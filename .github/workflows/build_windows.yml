@@ -11,10 +11,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4  # 升级到了 v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5 # 升级到了 v5
       with:
         python-version: "3.10"
 
@@ -25,14 +25,12 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # --onefile: 打包成单文件
-        # --noconsole: 运行时不显示黑框
-        # --name: 程序名字
-        # --add-data: 确保 assets 文件夹稍微处理一下，或者让程序首次运行自动生成空文件夹
+        # PyInstaller 打包命令
         pyinstaller --onefile --noconsole --name "EVE_Warning" main.py
 
     - name: Upload Artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # 核心修复：升级到了 v4
       with:
         name: EVE_Warning_Executable
         path: dist/EVE_Warning.exe
+        # v4 版本默认不再压缩文件，如果你下载后发现不是zip而是直接的exe也是正常的
