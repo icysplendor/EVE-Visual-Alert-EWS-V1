@@ -1,0 +1,8 @@
+PyQt6
+opencv-python
+numpy
+mss
+requests
+imageio
+# 用于打包
+pyinstaller
