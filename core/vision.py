@@ -49,8 +49,12 @@ class VisionEngine:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
                 try:
+                    # 必须保留 Alpha 通道
                     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                     if img is not None:
+                        # 如果没有 Alpha 通道 (比如JPG)，手动加一个全白的 Alpha
+                        if img.shape[2] == 3:
+                            img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
                         templates.append(img)
                 except:
                     pass
@@ -66,6 +70,8 @@ class VisionEngine:
         try:
             with mss.mss() as sct:
                 img = np.array(sct.grab(monitor))
+                # mss 返回 BGRA，这很好，保留它用于后续比对
+                # 但为了兼容之前的逻辑，我们这里返回 BGR，但在匹配时我们会重新处理
                 img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 
                 h, w = img_bgr.shape[:2]
@@ -81,92 +87,85 @@ class VisionEngine:
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
         """
-        核心匹配逻辑：增加颜色校验
+        重写的匹配逻辑：基于掩码的平方差匹配 (Masked SQDIFF)
+        这种方式对颜色极其敏感，且完美支持透明度忽略。
         """
         if screen_img is None:
-            err = self.last_error if self.last_error else "未获取到截图(区域未设置?)"
+            err = self.last_error if self.last_error else "未获取到截图"
             return (err, 0.0) if return_max_val else False
             
         if not template_list:
-            return ("无模板文件(请检查assets)", 0.0) if return_max_val else False
+            return ("无模板", 0.0) if return_max_val else False
 
-        screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
-        max_score_found = 0.0
+        # 将屏幕截图保持 BGR 格式 (OpenCV默认)
+        # 之前的逻辑是转灰度，现在我们用彩色匹配来提高准确度
+        screen_h, screen_w = screen_img.shape[:2]
         
+        max_score_found = 0.0
         all_skipped = True 
 
         for tmpl in template_list:
             tmpl_h, tmpl_w = tmpl.shape[:2]
-            screen_h, screen_w = screen_gray.shape[:2]
             
+            # 尺寸检查
             if screen_h < tmpl_h or screen_w < tmpl_w:
                 continue 
-            
             all_skipped = False 
 
-            # 处理掩码
-            mask = None
-            tmpl_bgr = tmpl
+            # 分离模板的 BGR 和 Alpha
             if tmpl.shape[2] == 4:
-                b, g, r, a = cv2.split(tmpl)
-                mask = a
-                tmpl_bgr = cv2.merge([b,g,r])
-                tmpl_gray = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
+                tmpl_bgr = tmpl[:, :, :3]
+                mask = tmpl[:, :, 3]
             else:
-                tmpl_gray = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
+                tmpl_bgr = tmpl
+                mask = np.ones((tmpl_h, tmpl_w), dtype=np.uint8) * 255
 
             try:
-                # 1. 形状匹配 (TM_CCOEFF_NORMED)
-                if mask is not None:
-                    res = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED, mask=mask)
-                else:
-                    res = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
+                # === 核心算法变更 ===
+                # 使用 TM_SQDIFF (平方差匹配)
+                # 这种算法计算的是：(T - I)^2
+                # 结果越小越好 (0表示完全一样)
+                # 支持 mask：mask为0的地方不参与计算
                 
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                res = cv2.matchTemplate(screen_img, tmpl_bgr, cv2.TM_SQDIFF, mask=mask)
                 
-                # 2. === 新增：颜色绝对值校验 ===
-                # 如果形状分数达标，我们再检查一遍颜色是否真的对
-                if max_val >= threshold:
-                    top_left = max_loc
-                    bottom_right = (top_left[0] + tmpl_w, top_left[1] + tmpl_h)
-                    
-                    # 把屏幕上匹配到的这一小块切出来
-                    screen_crop = screen_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
-                    
-                    # 计算色差 (screen_crop - template)
-                    # 我们只关心 mask 部分的色差
-                    diff = cv2.absdiff(screen_crop, tmpl_bgr)
-                    
-                    if mask is not None:
-                        # 计算掩码区域内的平均色差
-                        mean_diff = cv2.mean(diff, mask=mask)
-                    else:
-                        mean_diff = cv2.mean(diff)
-                    
-                    # mean_diff 返回 (B_diff, G_diff, R_diff, A_diff)
-                    # 我们计算 RGB 平均差异值
-                    avg_color_diff = (mean_diff[0] + mean_diff[1] + mean_diff[2]) / 3.0
-                    
-                    # 设定一个严格的色差容忍度 (0-255)
-                    # 比如 30，意味着颜色平均偏差不能超过 30
-                    # 红色(0,0,255) 和 白色(255,255,255) 的差异极大，会被这里过滤掉
-                    color_tolerance = 40.0 
-                    
-                    if avg_color_diff > color_tolerance:
-                        # 虽然形状像，但颜色不对，强行扣分
-                        # print(f"形状匹配但颜色不对: 差异 {avg_color_diff:.2f}")
-                        max_val = 0.1 # 降级为低分
-                    
-                # ===============================
+                # 找到最小差异值 (min_val)
+                min_val, _, _, _ = cv2.minMaxLoc(res)
+                
+                # === 将差异值转换为相似度分数 (0.0 - 1.0) ===
+                # SQDIFF 的结果是像素差的平方和。
+                # 我们需要归一化它。
+                # 1. 计算掩码内的有效像素数
+                valid_pixels = cv2.countNonZero(mask)
+                if valid_pixels == 0: continue
+                
+                # 2. 计算平均每个像素的差异
+                # min_val 是总平方差
+                avg_diff_per_pixel = min_val / valid_pixels
+                
+                # 3. 转换为 0-1 分数
+                # 假设最大允许的平均差异是 10000 (大概相当于每个颜色通道差60左右)
+                # 这是一个经验值，可以调整。差异越小，score 越接近 1
+                # 这种转换是非线性的，对精准匹配非常敏感
+                
+                # 稍微放宽一点分母，防止分数太低
+                score = 1.0 / (1.0 + avg_diff_per_pixel / 1000.0)
+                
+                # 修正逻辑：如果差异极小，score 会接近 1.0
+                # 如果差异很大，score 会迅速掉到 0.1 以下
+                
+                if score > max_score_found:
+                    max_score_found = score
 
-                if max_val > max_score_found:
-                    max_score_found = max_val
-            except:
+            except Exception as e:
+                # print(f"Match error: {e}")
                 continue
 
         if all_skipped:
-            return ("所有模板均大于截图区域", 0.0) if return_max_val else False
+            return ("尺寸错误", 0.0) if return_max_val else False
 
+        # 由于 SQDIFF 转换的分数通常比较苛刻
+        # 0.95 的阈值可能太高了，建议用户在 UI 上调整到 0.8 左右开始测试
         if return_max_val:
             return (None, max_score_found)
         else:
