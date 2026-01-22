@@ -14,12 +14,12 @@ class AlarmWorker(QObject):
         self.running = False
         self.thread = None
         self.status = {"local": False, "overview": False, "monster": False}
-        self.first_run = True
+        self.first_run = True 
 
     def start(self):
         if not self.running:
             self.running = True
-            self.first_run = True
+            self.first_run = True 
             self.thread = threading.Thread(target=self._loop, daemon=True)
             self.thread.start()
 
@@ -32,6 +32,7 @@ class AlarmWorker(QObject):
         while self.running:
             now_str = datetime.now().strftime("%H:%M:%S")
             
+            # 系统自检报告
             if self.first_run:
                 self.vision.load_templates()
                 report = (
@@ -45,24 +46,24 @@ class AlarmWorker(QObject):
 
             regions = self.cfg.get("regions")
             
-            # === 修改点：分别读取三个阈值 ===
+            # === 修改点：分别获取三个独立的阈值 ===
             thresholds = self.cfg.get("thresholds")
-            # 兼容旧配置文件的保护措施
             t_local = thresholds.get("local", 0.95)
             t_overview = thresholds.get("overview", 0.95)
             t_monster = thresholds.get("monster", 0.95)
-            # ============================
 
+            # 截图
             img_local = self.vision.capture_screen(regions.get("local"), "local")
             img_overview = self.vision.capture_screen(regions.get("overview"), "overview")
             img_monster = self.vision.capture_screen(regions.get("monster"), "monster")
 
+            # 匹配逻辑
             def process_match(img, templates, thresh):
                 err_msg, score = self.vision.match_templates(img, templates, thresh, True)
                 is_hit = score >= thresh
                 return is_hit, score, err_msg
 
-            # === 修改点：传入对应的阈值 ===
+            # === 修改点：传入各自的阈值 ===
             is_local, score_local, err_local = process_match(img_local, self.vision.hostile_templates, t_local)
             is_overview, score_overview, err_overview = process_match(img_overview, self.vision.hostile_templates, t_overview)
             is_monster, score_monster, err_monster = process_match(img_monster, self.vision.monster_templates, t_monster)
@@ -71,6 +72,7 @@ class AlarmWorker(QObject):
             self.status["overview"] = is_overview
             self.status["monster"] = is_monster
 
+            # 报警逻辑
             has_threat = is_local or is_overview
             sound_to_play = None
             if has_threat and is_monster: sound_to_play = "mixed"
