@@ -6,8 +6,12 @@ LANGUAGES = {
         "btn_local": "本地栏",
         "btn_overview": "总览栏",
         "btn_npc": "怪物栏",
-        "lbl_threshold": "识别阈值:",
         "lbl_webhook": "Webhook:",
+        # === 新增阈值标签 ===
+        "lbl_th_local": "本地阈值:",
+        "lbl_th_over": "总览阈值:",
+        "lbl_th_npc": "怪物阈值:",
+        # ==================
         "lbl_sound_local": "本地预警:",
         "lbl_sound_overview": "总览预警:",
         "lbl_sound_npc": "刷怪提示:",
@@ -26,12 +30,16 @@ LANGUAGES = {
     "EN": {
         "window_title": "EVE Visual Alert",
         "grp_monitor": "Scanning Sectors",
-        "grp_config": "Settings", # Configuration 太长改成 Settings
+        "grp_config": "Settings",
         "btn_local": "Local",
         "btn_overview": "Overview",
         "btn_npc": "Rats",
-        "lbl_threshold": "Threshold:",
         "lbl_webhook": "Webhook:",
+        # === New Threshold Labels ===
+        "lbl_th_local": "Local Thresh:",
+        "lbl_th_over": "Over Thresh:",
+        "lbl_th_npc": "Rat Thresh:",
+        # ============================
         "lbl_sound_local": "Local:",
         "lbl_sound_overview": "Overview:",
         "lbl_sound_npc": "Rats:",
@@ -39,7 +47,7 @@ LANGUAGES = {
         "btn_select": "...",
         "btn_start": "ENGAGE",
         "btn_stop": "STOP",
-        "btn_debug": "LIVE VIEW", # 改短，Visual Feed 太长
+        "btn_debug": "LIVE VIEW",
         "log_ready": "System Ready.",
         "log_start": ">>> Monitoring Engaged",
         "log_stop": ">>> Monitoring Halted",
