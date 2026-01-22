@@ -4,8 +4,9 @@ import os
 CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
+    "language": "CN", # 默认为中文
     "regions": {
-        "local": None,     # [x, y, w, h]
+        "local": None,
         "overview": None,
         "monster": None
     },
