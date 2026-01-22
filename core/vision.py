@@ -8,98 +8,135 @@ class VisionEngine:
         self.sct = mss.mss()
         self.hostile_templates = []
         self.monster_templates = []
+        
+        # 调试目录
+        self.debug_dir = "debug_scans"
+        if not os.path.exists(self.debug_dir):
+            os.makedirs(self.debug_dir)
+            
+        print(">>> [Vision] 视觉引擎初始化...")
         self.load_templates()
 
     def load_templates(self):
-        self.hostile_templates = self._load_images_from_folder("assets/hostile_icons")
-        self.monster_templates = self._load_images_from_folder("assets/monster_icons")
+        # 强制打印加载路径，让你确认路径对不对
+        cwd = os.getcwd()
+        print(f">>> [Vision] 当前工作目录: {cwd}")
+        
+        path_hostile = os.path.join(cwd, "assets", "hostile_icons")
+        path_monster = os.path.join(cwd, "assets", "monster_icons")
+        
+        print(f">>> [Vision] 正在尝试加载敌对图标: {path_hostile}")
+        self.hostile_templates = self._load_images_from_folder(path_hostile, "HOSTILE")
+        
+        print(f">>> [Vision] 正在尝试加载怪物图标: {path_monster}")
+        self.monster_templates = self._load_images_from_folder(path_monster, "MONSTER")
+        
+        print(f"==========================================")
+        print(f"   模板加载统计: 敌对[{len(self.hostile_templates)}] | 怪物[{len(self.monster_templates)}]")
+        print(f"==========================================")
 
-    def _load_images_from_folder(self, folder):
+    def _load_images_from_folder(self, folder, tag):
         templates = []
         if not os.path.exists(folder):
+            print(f"!!! [Vision] 错误: 文件夹不存在 -> {folder}")
             os.makedirs(folder)
             return templates
             
-        for filename in os.listdir(folder):
+        files = os.listdir(folder)
+        if not files:
+            print(f"!!! [Vision] 警告: 文件夹是空的 -> {folder}")
+
+        for filename in files:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
-                # 读取原图 (可能包含Alpha通道)
                 img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                 if img is not None:
+                    h, w = img.shape[:2]
                     templates.append(img)
+                    print(f"    -> [{tag}] 已加载: {filename} (尺寸: {w}x{h})")
+                else:
+                    print(f"    -> [{tag}] 读取失败 (损坏?): {filename}")
         return templates
 
-    def capture_screen(self, region):
-        # region: [x, y, w, h]
-        if not region: return None
-        # mss截取区域必须要整数
+    def capture_screen(self, region, debug_name=None):
+        if not region: 
+            return None
+        
         monitor = {
             "top": int(region[1]), 
             "left": int(region[0]), 
             "width": int(region[2]), 
             "height": int(region[3])
         }
+        
         try:
             img = np.array(self.sct.grab(monitor))
-            # MSS返回 BGRA，转为 BGR 方便OpenCV处理
-            return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            
+            # 保存截图供检查
+            if debug_name:
+                cv2.imwrite(os.path.join(self.debug_dir, f"debug_{debug_name}.png"), img_bgr)
+                
+            return img_bgr
         except Exception as e:
-            print(f"截图失败: {e}")
+            print(f"!!! [Vision] 截图失败: {e}")
             return None
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
-        """
-        return_max_val: 如果为True，返回 (Bool, max_val) 用来调试
-        """
-        if screen_img is None or not template_list:
+        # 1. 检查截图是否存在
+        if screen_img is None:
+            # 这种情况通常是因为用户还没画框
+            return (False, 0.0) if return_max_val else False
+            
+        # 2. 检查模板列表是否为空
+        if not template_list:
+            # 如果这里返回了，说明 assets 文件夹里没图片，或者还没加载
+            # 这是导致相似度 0.0 的第一大原因
             return (False, 0.0) if return_max_val else False
 
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
+        screen_h, screen_w = screen_gray.shape[:2]
         
         max_score_found = 0.0
-
-        for tmpl in template_list:
+        
+        # 遍历每一个模板
+        for i, tmpl in enumerate(template_list):
             tmpl_h, tmpl_w = tmpl.shape[:2]
             
-            # 屏幕截图比模板还小，不可能匹配成功，直接跳过
-            if screen_gray.shape[0] < tmpl_h or screen_gray.shape[1] < tmpl_w:
+            # 3. 尺寸检查 (这是导致相似度 0.0 的第二大原因)
+            if screen_h < tmpl_h or screen_w < tmpl_w:
+                # 你的截图比你的模板还小，根本没法找
+                if return_max_val:
+                    # 只有调试模式才打印，防止刷屏
+                    print(f"!!! [Vision] 尺寸错误: 截图({screen_w}x{screen_h}) 小于 模板{i}({tmpl_w}x{tmpl_h})，跳过比对。")
                 continue
 
-            # 处理透明通道
             mask = None
             if tmpl.shape[2] == 4:
-                # 拆分通道: B, G, R, Alpha
                 b, g, r, a = cv2.split(tmpl)
-                # 将原来的BGRA转为灰度用于匹配内容
-                # 注意：这里需要先把前3个通道合成为BGR再转Gray，否则cvtColor会报错
                 tmpl_bgr = cv2.merge([b, g, r])
                 tmpl_gray = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
-                mask = a # 使用Alpha通道作为掩码
+                # 如果是完全透明的像素，a=0，mask起作用
+                mask = a 
             else:
                 tmpl_gray = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
 
             try:
-                # 核心修正：传入 mask 参数
-                # 注意：TM_CCOEFF_NORMED 支持 mask，但要求 screen 和 temp 大小关系正确
                 if mask is not None:
                     res = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED, mask=mask)
                 else:
                     res = cv2.matchTemplate(screen_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
                 
-                min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
+                _, max_val, _, _ = cv2.minMaxLoc(res)
                 
                 if max_val > max_score_found:
                     max_score_found = max_val
-                
-                if max_val >= threshold:
-                    if not return_max_val:
-                        return True
+                    
             except Exception as e:
-                # 某些情况下尺寸不匹配会报错，忽略该模板
-                print(f"匹配错误: {e}")
+                print(f"!!! [Vision] OpenCV 内部错误: {e}")
                 continue
 
         if return_max_val:
             return (max_score_found >= threshold, max_score_found)
         else:
-            return False
+            return max_score_found >= threshold
