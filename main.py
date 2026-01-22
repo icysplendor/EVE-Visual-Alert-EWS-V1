@@ -20,15 +20,18 @@ class DebugWindow(QDialog):
         layout = QHBoxLayout()
         self.lbl_local = QLabel("本地栏")
         self.lbl_local.setFixedSize(200, 200)
-        self.lbl_local.setStyleSheet("border: 1px solid red;")
+        self.lbl_local.setStyleSheet("border: 1px solid red; background: #333;")
+        self.lbl_local.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         self.lbl_overview = QLabel("总览")
         self.lbl_overview.setFixedSize(200, 200)
-        self.lbl_overview.setStyleSheet("border: 1px solid green;")
+        self.lbl_overview.setStyleSheet("border: 1px solid green; background: #333;")
+        self.lbl_overview.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.lbl_monster = QLabel("怪物")
         self.lbl_monster.setFixedSize(200, 200)
-        self.lbl_monster.setStyleSheet("border: 1px solid blue;")
+        self.lbl_monster.setStyleSheet("border: 1px solid blue; background: #333;")
+        self.lbl_monster.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         layout.addWidget(self.lbl_local)
         layout.addWidget(self.lbl_overview)
@@ -40,8 +43,6 @@ class DebugWindow(QDialog):
             if np_img is None: return QPixmap()
             h, w, ch = np_img.shape
             bytes_per_line = ch * w
-            # OpenCV is BGR, Qt is RGB
-            # img = cv2.cvtColor(np_img, cv2.COLOR_BGR2RGB) # assume external does this or display as is
             qimg = QImage(np_img.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
             return QPixmap.fromImage(qimg).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio)
 
@@ -53,7 +54,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("EVE Warning System Pro")
-        self.resize(600, 700)
+        self.resize(600, 750)
         
         # 初始化核心组件
         self.cfg = ConfigManager()
@@ -61,8 +62,8 @@ class MainWindow(QMainWindow):
         self.logic = AlarmWorker(self.cfg, self.vision)
         self.logic.log_signal.connect(self.log)
         
-        # 初始化音频播放器 (在主线程加载)
-        self.sounds = {} # key: QSoundEffect
+        # 初始化音频播放器
+        self.sounds = {} 
         self.load_sounds()
 
         self.setup_ui()
@@ -71,12 +72,27 @@ class MainWindow(QMainWindow):
         self.debug_timer = QTimer()
         self.debug_timer.timeout.connect(self.update_debug_view)
         
-        # 定时器用于检查逻辑线程的报警请求（简化实现）
-        # 实际上可以通过信号槽从 logic 传出 sound_key 
-        self.logic.log_signal.connect(self.handle_alarm_signal) # 复用log信号做演示
+        # 监听逻辑线程的信号来播放声音
+        self.logic.log_signal.connect(self.handle_alarm_signal)
+
+        # === 自动启动检测 ===
+        self.check_auto_start()
+
+    def check_auto_start(self):
+        """
+        检查配置，如果区域已设置，自动启动
+        """
+        regions = self.cfg.get("regions")
+        # 只要设置了 Local 或 Overview 其中之一，就视为有效配置，尝试自动启动
+        if regions.get("local") is not None or regions.get("overview") is not None:
+            self.log("配置文件检测有效，正在自动启动...")
+            self.toggle_monitoring()
+        else:
+            self.log("未检测到预设区域，等待用户配置...")
 
     def load_sounds(self):
         paths = self.cfg.get("audio_paths")
+        if not paths: return
         for key, path in paths.items():
             if path and os.path.exists(path):
                 effect = QSoundEffect()
@@ -108,6 +124,7 @@ class MainWindow(QMainWindow):
         row1.addWidget(QLabel("敌对相似度:"))
         spin_hostile = QDoubleSpinBox()
         spin_hostile.setRange(0.1, 1.0)
+        spin_hostile.setSingleStep(0.05)
         spin_hostile.setValue(self.cfg.get("thresholds")["hostile"])
         spin_hostile.valueChanged.connect(lambda v: self.update_threshold("hostile", v))
         row1.addWidget(spin_hostile)
@@ -124,7 +141,8 @@ class MainWindow(QMainWindow):
         for key in ["local", "overview", "monster", "mixed"]:
             row = QHBoxLayout()
             row.addWidget(QLabel(f"{key} 声音:"))
-            path_label = QLabel(os.path.basename(self.cfg.get("audio_paths").get(key, "")))
+            path_val = self.cfg.get("audio_paths").get(key, "")
+            path_label = QLabel(os.path.basename(path_val) if path_val else "未设置")
             btn = QPushButton("选择...")
             btn.clicked.connect(lambda _, k=key, l=path_label: self.select_audio(k, l))
             row.addWidget(path_label)
@@ -150,6 +168,8 @@ class MainWindow(QMainWindow):
         # 日志区
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
+        # 设置最大行数防止内存溢出
+        self.txt_log.document().setMaximumBlockCount(1000) 
         layout.addWidget(self.txt_log)
         
         self.debug_window = DebugWindow(self)
@@ -163,7 +183,7 @@ class MainWindow(QMainWindow):
         regions = self.cfg.get("regions")
         regions[key] = list(rect)
         self.cfg.set("regions", regions)
-        self.log(f"更新区域 {key}: {rect}")
+        self.log(f"已更新区域 {key}: {rect}")
 
     def update_threshold(self, key, val):
         t = self.cfg.get("thresholds")
@@ -181,25 +201,37 @@ class MainWindow(QMainWindow):
 
     def toggle_monitoring(self):
         if not self.logic.running:
+            # 检查是否有区域
+            regions = self.cfg.get("regions")
+            if not regions.get("local") and not regions.get("overview"):
+                self.log("⚠️ 错误: 请先设置至少一个监控区域 (Local 或 Overview)")
+                return
+
             self.logic.start()
             self.btn_start.setText("停止监控")
-            self.btn_start.setStyleSheet("background-color: red; color: white;")
-            self.log("系统启动...")
+            self.btn_start.setStyleSheet("background-color: red; color: white; font-weight: bold; height: 40px;")
         else:
             self.logic.stop()
             self.btn_start.setText("启动监控")
-            self.btn_start.setStyleSheet("background-color: green; color: white;")
+            self.btn_start.setStyleSheet("background-color: green; color: white; font-weight: bold; height: 40px;")
             self.log("系统停止.")
 
     def handle_alarm_signal(self, msg):
-        # 这里实际上包含了日志和报警指令
-        self.log(msg)
-        if "类型: " in msg:
-            sound_type = msg.split("类型: ")[1].strip()
-            if sound_type in self.sounds:
-                effect = self.sounds[sound_type]
-                if not effect.isPlaying():
-                    effect.play()
+        # 尝试从日志消息中解析出报警类型来播放声音
+        # 消息格式: "[timestamp] ⚠️ 触发报警: TYPE [status]"
+        if "⚠️ 触发报警:" in msg:
+            try:
+                parts = msg.split("⚠️ 触发报警:")
+                if len(parts) > 1:
+                    # 取出 'LOCAL', 'OVERVIEW' 等
+                    # 比如 " LOCAL [status...]" -> "LOCAL"
+                    sound_type = parts[1].strip().split()[0].lower()
+                    if sound_type in self.sounds:
+                        effect = self.sounds[sound_type]
+                        if not effect.isPlaying():
+                            effect.play()
+            except Exception as e:
+                print(f"音频播放解析错误: {e}")
 
     def show_debug_window(self):
         self.debug_window.show()
@@ -211,9 +243,9 @@ class MainWindow(QMainWindow):
             return
         
         regions = self.cfg.get("regions")
-        img_local = self.vision.capture_screen(regions["local"])
-        img_overview = self.vision.capture_screen(regions["overview"])
-        img_monster = self.vision.capture_screen(regions["monster"])
+        img_local = self.vision.capture_screen(regions.get("local"))
+        img_overview = self.vision.capture_screen(regions.get("overview"))
+        img_monster = self.vision.capture_screen(regions.get("monster"))
         self.debug_window.update_images(img_local, img_overview, img_monster)
 
     def log(self, text):
