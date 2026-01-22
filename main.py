@@ -30,7 +30,7 @@ QMainWindow {
     background-color: #121212;
 }
 QWidget {
-    font-family: "Segoe UI", "Arial", sans-serif;
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif; /* 增加微软雅黑支持中文 */
     font-size: 11px;
     color: #cccccc;
 }
@@ -39,7 +39,7 @@ QGroupBox {
     border-radius: 3px;
     margin-top: 10px;
     font-weight: bold;
-    color: #00bcd4; /* Cyan EVE Color */
+    color: #00bcd4; 
 }
 QGroupBox::title {
     subcontrol-origin: margin;
@@ -70,7 +70,7 @@ QPushButton#btn_start {
     font-weight: bold;
     font-size: 12px;
 }
-QPushButton#btn_start:checked { /* 停止状态 */
+QPushButton#btn_start:checked { 
     background-color: #3b1a1a;
     border: 1px solid #c62828;
     color: #ef5350;
@@ -79,6 +79,7 @@ QPushButton#btn_debug {
     background-color: #1a2a3a;
     border: 1px solid #0277bd;
     color: #29b6f6;
+    font-weight: bold;
 }
 QLineEdit, QDoubleSpinBox {
     background-color: #000;
@@ -93,7 +94,6 @@ QTextEdit {
     font-size: 10px;
     color: #aaa;
 }
-/* 滚动条美化 */
 QScrollBar:vertical {
     border: none;
     background: #111;
@@ -108,12 +108,13 @@ QScrollBar::handle:vertical {
 class DebugWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("VISUAL FEED")
+        self.setWindowTitle("LIVE VIEW")
         self.setStyleSheet("background-color: #000; color: #00bcd4;")
         layout = QHBoxLayout()
         layout.setContentsMargins(5,5,5,5)
         
         self.labels = {}
+        # 注意：这里的标题只是显示用，不需要翻译太复杂
         for key in ["Local", "Overview", "Npc"]:
             vbox = QVBoxLayout()
             lbl_title = QLabel(key.upper())
@@ -149,26 +150,22 @@ class MainWindow(QMainWindow):
         self.cfg = ConfigManager()
         self.vision = VisionEngine()
         self.logic = AlarmWorker(self.cfg, self.vision)
-        
-        # 2. 初始化翻译器，但在 UI 建立前暂不绑定回调，防止提前触发 AttributeError
         self.i18n = Translator(None) 
         
-        # 3. 建立 UI 控件
+        # 2. 建立 UI
         self.init_core()
         self.setup_ui()
         
-        # 4. 应用样式与尺寸
+        # 3. 样式与尺寸 (稍微加宽一点适应英文)
         self.setStyleSheet(EVE_STYLE)
-        self.resize(380, 520)
+        self.resize(400, 520) 
 
-        # 5. UI 就绪后，绑定回调并加载语言
-        self.i18n.callback = self.refresh_ui_text # 绑定刷新方法
-        
+        # 4. 绑定回调并刷新
+        self.i18n.callback = self.refresh_ui_text 
         saved_lang = self.cfg.get("language")
         if saved_lang:
             self.i18n.set_language(saved_lang)
         else:
-            # 如果没有保存过，默认刷新一次当前语言
             self.refresh_ui_text()
 
     def init_core(self):
@@ -178,8 +175,6 @@ class MainWindow(QMainWindow):
         self.logic.log_signal.connect(self.handle_alarm_signal)
         self.debug_timer = QTimer()
         self.debug_timer.timeout.connect(self.update_debug_view)
-        
-        # Auto Start Logic
         QTimer.singleShot(1000, self.check_auto_start)
 
     def check_auto_start(self):
@@ -202,14 +197,13 @@ class MainWindow(QMainWindow):
         self.central = QWidget()
         self.setCentralWidget(self.central)
         
-        # 主布局，紧凑模式
         main_layout = QVBoxLayout(self.central)
         main_layout.setSpacing(8)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(12, 12, 12, 12)
 
-        # === 顶部: 标题 + 语言切换 ===
+        # === 顶部 ===
         top_layout = QHBoxLayout()
-        self.lbl_title = QLabel("EVE WARNING")
+        self.lbl_title = QLabel("EVE ALERT")
         self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #fff;")
         
         self.btn_lang = QPushButton("EN")
@@ -221,8 +215,8 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(self.btn_lang)
         main_layout.addLayout(top_layout)
 
-        # === 区域设置 (一行三个小按钮) ===
-        self.grp_monitor = QGroupBox("Monitoring Sectors")
+        # === 区域设置 ===
+        self.grp_monitor = QGroupBox("Sectors")
         layout_mon = QHBoxLayout()
         layout_mon.setSpacing(5)
         
@@ -233,19 +227,19 @@ class MainWindow(QMainWindow):
         for btn, key in [(self.btn_set_local, "local"), 
                          (self.btn_set_overview, "overview"), 
                          (self.btn_set_npc, "monster")]:
-            btn.setFixedHeight(25)
+            btn.setFixedHeight(28) # 稍微加高一点
             btn.clicked.connect(lambda _, k=key: self.start_region_selection(k))
             layout_mon.addWidget(btn)
             
         self.grp_monitor.setLayout(layout_mon)
         main_layout.addWidget(self.grp_monitor)
 
-        # === 参数与音频配置 ===
-        self.grp_config = QGroupBox("Configuration")
+        # === 配置区 ===
+        self.grp_config = QGroupBox("Settings")
         layout_cfg = QVBoxLayout()
-        layout_cfg.setSpacing(5)
+        layout_cfg.setSpacing(6)
 
-        # 阈值 & Webhook
+        # 阈值
         row1 = QHBoxLayout()
         self.lbl_thresh = QLabel("Threshold:")
         self.spin_hostile = QDoubleSpinBox()
@@ -253,12 +247,13 @@ class MainWindow(QMainWindow):
         self.spin_hostile.setSingleStep(0.05)
         self.spin_hostile.setValue(self.cfg.get("thresholds")["hostile"])
         self.spin_hostile.valueChanged.connect(lambda v: self.update_cfg("thresholds", "hostile", v))
-        self.spin_hostile.setFixedWidth(50)
-        
+        self.spin_hostile.setFixedWidth(55)
         row1.addWidget(self.lbl_thresh)
         row1.addWidget(self.spin_hostile)
+        row1.addStretch() # 靠左对齐
         layout_cfg.addLayout(row1)
         
+        # Webhook
         row2 = QHBoxLayout()
         self.lbl_webhook = QLabel("Webhook:")
         self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
@@ -267,19 +262,16 @@ class MainWindow(QMainWindow):
         row2.addWidget(self.line_webhook)
         layout_cfg.addLayout(row2)
 
-        # 音频选择 (简化显示)
-        # 做成Grid，左边标签，右边按钮
+        # 音频列表
         for key in ["local", "overview", "monster", "mixed"]:
             row = QHBoxLayout()
             lbl = QLabel(f"{key}:")
-            # 存储引用以便翻译可以找到它
             setattr(self, f"lbl_sound_{key}", lbl) 
             
-            # 显示文件名的Label (淡色)
             path_val = self.cfg.get("audio_paths").get(key, "")
             fname = os.path.basename(path_val) if path_val else "---"
             lbl_file = QLabel(fname)
-            lbl_file.setStyleSheet("color: #666;")
+            lbl_file.setStyleSheet("color: #666; font-size: 10px;")
             
             btn_sel = QPushButton("...")
             btn_sel.setFixedSize(25, 20)
@@ -294,24 +286,25 @@ class MainWindow(QMainWindow):
         self.grp_config.setLayout(layout_cfg)
         main_layout.addWidget(self.grp_config)
 
-        # === 主控制按钮区 ===
+        # === 底部控制 ===
         layout_ctrl = QHBoxLayout()
         
         self.btn_start = QPushButton("ENGAGE")
-        self.btn_start.setObjectName("btn_start") # 用于CSS
-        self.btn_start.setFixedHeight(35)
+        self.btn_start.setObjectName("btn_start") 
+        self.btn_start.setFixedHeight(40) # 加大尺寸
         self.btn_start.clicked.connect(self.toggle_monitoring)
         
-        self.btn_debug = QPushButton("VISUAL")
+        self.btn_debug = QPushButton("VIEW")
         self.btn_debug.setObjectName("btn_debug")
-        self.btn_debug.setFixedSize(60, 35)
+        # 修改点：宽度加到 90，确保 LIVE VIEW 放得下
+        self.btn_debug.setFixedSize(90, 40) 
         self.btn_debug.clicked.connect(self.show_debug_window)
         
         layout_ctrl.addWidget(self.btn_start)
         layout_ctrl.addWidget(self.btn_debug)
         main_layout.addLayout(layout_ctrl)
 
-        # === 日志区 ===
+        # === 日志 ===
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
         self.txt_log.setFrameShape(QFrame.Shape.NoFrame)
@@ -321,7 +314,6 @@ class MainWindow(QMainWindow):
         self.log(self.i18n.get("log_ready"))
 
     def refresh_ui_text(self):
-        """核心方法：根据当前语言刷新所有界面文字"""
         _ = self.i18n.get
         
         self.setWindowTitle(_("window_title"))
@@ -337,7 +329,6 @@ class MainWindow(QMainWindow):
         self.lbl_thresh.setText(_("lbl_threshold"))
         self.lbl_webhook.setText(_("lbl_webhook"))
         
-        # 刷新声音标签
         self.lbl_sound_local.setText(_("lbl_sound_local"))
         self.lbl_sound_overview.setText(_("lbl_sound_overview"))
         self.lbl_sound_monster.setText(_("lbl_sound_npc"))
@@ -353,7 +344,6 @@ class MainWindow(QMainWindow):
 
     def toggle_language(self):
         self.i18n.toggle()
-        # 保存设置
         self.cfg.set("language", self.i18n.lang)
 
     def start_region_selection(self, key):
@@ -373,7 +363,7 @@ class MainWindow(QMainWindow):
         self.cfg.set(section, t)
 
     def select_audio(self, key, label_widget):
-        fname, _ = QFileDialog.getOpenFileName(self, "Load Audio", "", "Audio (*.wav *.mp3)")
+        fname, _ = QFileDialog.getOpenFileName(self, "Audio File", "", "Audio (*.wav *.mp3)")
         if fname:
             paths = self.cfg.get("audio_paths")
             paths[key] = fname
@@ -391,7 +381,7 @@ class MainWindow(QMainWindow):
 
             self.logic.start()
             self.btn_start.setText(_("btn_stop"))
-            self.btn_start.setChecked(True) # 改变样式
+            self.btn_start.setChecked(True)
             self.log(_("log_start"))
         else:
             self.logic.stop()
@@ -400,10 +390,7 @@ class MainWindow(QMainWindow):
             self.log(_("log_stop"))
 
     def handle_alarm_signal(self, msg):
-        # 注意：这里我们接收到的是 logic 层发来的原始字符串
-        # 暂时不翻译日志里的动态分析数据，只翻译 UI
         if "⚠️" in msg:
-            # 简单的解析逻辑，兼容中文和英文环境的底层逻辑
             for keyword in ["mixed", "overview", "local", "monster"]:
                 if keyword.upper() in msg.upper():
                     if keyword in self.sounds:
