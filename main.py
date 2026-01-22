@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         
         self.setStyleSheet(EVE_STYLE)
-        self.resize(400, 550) # 稍微加高一点以容纳新的设置行
+        self.resize(400, 550) 
 
         self.i18n.callback = self.refresh_ui_text 
         saved_lang = self.cfg.get("language")
@@ -178,14 +178,21 @@ class MainWindow(QMainWindow):
             self.toggle_monitoring()
 
     def load_sounds(self):
-        paths = self.cfg.get("audio_paths")
-        if not paths: return
-        for key, path in paths.items():
+        """
+        加载音频，支持相对路径
+        """
+        for key in ["local", "overview", "monster", "mixed"]:
+            # 使用 ConfigManager 的 get_audio_path 获取绝对路径
+            path = self.cfg.get_audio_path(key)
+            
             if path and os.path.exists(path):
                 effect = QSoundEffect()
-                effect.setSource(QUrl.fromLocalFile(os.path.abspath(path)))
+                effect.setSource(QUrl.fromLocalFile(path))
                 effect.setVolume(1.0)
                 self.sounds[key] = effect
+            else:
+                if key in self.sounds:
+                    del self.sounds[key]
 
     def setup_ui(self):
         self.central = QWidget()
@@ -233,7 +240,7 @@ class MainWindow(QMainWindow):
         layout_cfg = QVBoxLayout()
         layout_cfg.setSpacing(6)
 
-        # === 修改点：三个阈值并排显示 ===
+        # 阈值设置 (三列布局)
         row_thresh = QHBoxLayout()
         
         # 本地阈值
@@ -241,7 +248,7 @@ class MainWindow(QMainWindow):
         self.lbl_th_local = QLabel("Local %")
         self.spin_local = QDoubleSpinBox()
         self.spin_local.setRange(0.1, 1.0)
-        self.spin_local.setSingleStep(0.01) # 允许更精细的调节
+        self.spin_local.setSingleStep(0.01)
         self.spin_local.setValue(self.cfg.get("thresholds").get("local", 0.95))
         self.spin_local.valueChanged.connect(lambda v: self.update_cfg("thresholds", "local", v))
         vbox1.addWidget(self.lbl_th_local)
@@ -273,7 +280,6 @@ class MainWindow(QMainWindow):
         row_thresh.addLayout(vbox2)
         row_thresh.addLayout(vbox3)
         layout_cfg.addLayout(row_thresh)
-        # ================================
         
         # Webhook
         row2 = QHBoxLayout()
@@ -347,7 +353,6 @@ class MainWindow(QMainWindow):
         self.btn_set_overview.setText(_("btn_overview"))
         self.btn_set_npc.setText(_("btn_npc"))
         
-        # 刷新新增加的三个阈值标签
         self.lbl_th_local.setText(_("lbl_th_local"))
         self.lbl_th_over.setText(_("lbl_th_over"))
         self.lbl_th_npc.setText(_("lbl_th_npc"))
@@ -390,9 +395,22 @@ class MainWindow(QMainWindow):
     def select_audio(self, key, label_widget):
         fname, _ = QFileDialog.getOpenFileName(self, "Audio File", "", "Audio (*.wav *.mp3)")
         if fname:
+            # 获取当前工作目录
+            cwd = os.getcwd()
+            try:
+                # 尝试保存相对路径
+                rel_path = os.path.relpath(fname, cwd)
+                if rel_path.startswith(".."):
+                    save_path = fname
+                else:
+                    save_path = rel_path
+            except ValueError:
+                save_path = fname
+
             paths = self.cfg.get("audio_paths")
-            paths[key] = fname
+            paths[key] = save_path
             self.cfg.set("audio_paths", paths)
+            
             label_widget.setText(os.path.basename(fname))
             self.load_sounds()
 
