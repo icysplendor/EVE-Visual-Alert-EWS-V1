@@ -14,12 +14,12 @@ class AlarmWorker(QObject):
         self.running = False
         self.thread = None
         self.status = {"local": False, "overview": False, "monster": False}
-        self.first_run = True # 标记符，用于这是不是第一次运行
+        self.first_run = True
 
     def start(self):
         if not self.running:
             self.running = True
-            self.first_run = True # 重置标记
+            self.first_run = True
             self.thread = threading.Thread(target=self._loop, daemon=True)
             self.thread.start()
 
@@ -32,9 +32,8 @@ class AlarmWorker(QObject):
         while self.running:
             now_str = datetime.now().strftime("%H:%M:%S")
             
-            # === [新增] 系统自检报告 (仅第一次运行输出) ===
             if self.first_run:
-                self.vision.load_templates() # 强制运行一次加载，确保状态最新
+                self.vision.load_templates()
                 report = (
                     f"--- 系统自检报告 ---\n"
                     f"{self.vision.template_status_msg}\n"
@@ -42,33 +41,36 @@ class AlarmWorker(QObject):
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
-                time.sleep(1) # 停顿一下让人看清
-            # ==========================================
+                time.sleep(1)
 
             regions = self.cfg.get("regions")
-            t_hostile = self.cfg.get("thresholds")["hostile"]
-            t_monster = self.cfg.get("thresholds")["monster"]
+            
+            # === 修改点：分别读取三个阈值 ===
+            thresholds = self.cfg.get("thresholds")
+            # 兼容旧配置文件的保护措施
+            t_local = thresholds.get("local", 0.95)
+            t_overview = thresholds.get("overview", 0.95)
+            t_monster = thresholds.get("monster", 0.95)
+            # ============================
 
-            # 截图 (带 debug_name)
             img_local = self.vision.capture_screen(regions.get("local"), "local")
             img_overview = self.vision.capture_screen(regions.get("overview"), "overview")
             img_monster = self.vision.capture_screen(regions.get("monster"), "monster")
 
-            # 匹配逻辑 (注意现在的 match_templates 返回的是 (ErrorMsg/None, Score))
             def process_match(img, templates, thresh):
                 err_msg, score = self.vision.match_templates(img, templates, thresh, True)
                 is_hit = score >= thresh
                 return is_hit, score, err_msg
 
-            is_local, score_local, err_local = process_match(img_local, self.vision.hostile_templates, t_hostile)
-            is_overview, score_overview, err_overview = process_match(img_overview, self.vision.hostile_templates, t_hostile)
+            # === 修改点：传入对应的阈值 ===
+            is_local, score_local, err_local = process_match(img_local, self.vision.hostile_templates, t_local)
+            is_overview, score_overview, err_overview = process_match(img_overview, self.vision.hostile_templates, t_overview)
             is_monster, score_monster, err_monster = process_match(img_monster, self.vision.monster_templates, t_monster)
 
             self.status["local"] = is_local
             self.status["overview"] = is_overview
             self.status["monster"] = is_monster
 
-            # 报警逻辑
             has_threat = is_local or is_overview
             sound_to_play = None
             if has_threat and is_monster: sound_to_play = "mixed"
@@ -76,9 +78,8 @@ class AlarmWorker(QObject):
             elif is_local: sound_to_play = "local"
             elif is_monster: sound_to_play = "monster"
 
-            # 格式化分数与错误
             def fmt(score, err):
-                if err: return f"❌{err}" # 如果有具体错误(无模板/截图失败)，显示错误
+                if err: return f"❌{err}"
                 return f"{score:.2f}"
 
             status_desc = (f"[L:{int(is_local)}({fmt(score_local, err_local)}) | "
