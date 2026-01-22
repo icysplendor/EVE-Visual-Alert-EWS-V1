@@ -144,24 +144,32 @@ class DebugWindow(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        # 1. 初始化核心逻辑
         self.cfg = ConfigManager()
         self.vision = VisionEngine()
         self.logic = AlarmWorker(self.cfg, self.vision)
-        self.i18n = Translator(self.refresh_ui_text) # 绑定刷新回调
         
-        # 恢复上次保存的语言
+        # 2. 初始化翻译器，但在 UI 建立前暂不绑定回调，防止提前触发 AttributeError
+        self.i18n = Translator(None) 
+        
+        # 3. 建立 UI 控件
+        self.init_core()
+        self.setup_ui()
+        
+        # 4. 应用样式与尺寸
+        self.setStyleSheet(EVE_STYLE)
+        self.resize(380, 520)
+
+        # 5. UI 就绪后，绑定回调并加载语言
+        self.i18n.callback = self.refresh_ui_text # 绑定刷新方法
+        
         saved_lang = self.cfg.get("language")
         if saved_lang:
             self.i18n.set_language(saved_lang)
-
-        self.init_core()
-        self.setup_ui()
-        self.refresh_ui_text() # 第一次刷新文字
-        
-        # 应用样式
-        self.setStyleSheet(EVE_STYLE)
-        # 紧凑尺寸
-        self.resize(380, 520) 
+        else:
+            # 如果没有保存过，默认刷新一次当前语言
+            self.refresh_ui_text()
 
     def init_core(self):
         self.sounds = {} 
@@ -264,7 +272,7 @@ class MainWindow(QMainWindow):
         for key in ["local", "overview", "monster", "mixed"]:
             row = QHBoxLayout()
             lbl = QLabel(f"{key}:")
-            # 存储引用以便翻译
+            # 存储引用以便翻译可以找到它
             setattr(self, f"lbl_sound_{key}", lbl) 
             
             # 显示文件名的Label (淡色)
@@ -329,6 +337,7 @@ class MainWindow(QMainWindow):
         self.lbl_thresh.setText(_("lbl_threshold"))
         self.lbl_webhook.setText(_("lbl_webhook"))
         
+        # 刷新声音标签
         self.lbl_sound_local.setText(_("lbl_sound_local"))
         self.lbl_sound_overview.setText(_("lbl_sound_overview"))
         self.lbl_sound_monster.setText(_("lbl_sound_npc"))
@@ -347,8 +356,6 @@ class MainWindow(QMainWindow):
         # 保存设置
         self.cfg.set("language", self.i18n.lang)
 
-    # ... (以下方法逻辑保持不变，只需微调日志输出) ...
-    
     def start_region_selection(self, key):
         self.selector = RegionSelector()
         self.selector.selection_finished.connect(lambda rect: self.save_region(key, rect))
