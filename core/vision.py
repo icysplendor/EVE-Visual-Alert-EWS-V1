@@ -5,7 +5,7 @@ import os
 
 class VisionEngine:
     def __init__(self):
-        self.sct = mss.mss()
+        # 移除 self.sct = mss.mss()，因为这会导致跨线程崩溃
         self.hostile_templates = []
         self.monster_templates = []
         
@@ -29,7 +29,6 @@ class VisionEngine:
         self.hostile_templates = self._load_images_from_folder(path_hostile)
         self.monster_templates = self._load_images_from_folder(path_monster)
         
-        # 生成诊断信息
         self.template_status_msg = (
             f"路径: {base_dir}\n"
             f"敌对模板: {len(self.hostile_templates)} 张\n"
@@ -57,52 +56,54 @@ class VisionEngine:
         return templates
 
     def capture_screen(self, region, debug_name=None):
-        self.last_error = None # 重置错误
+        self.last_error = None
         if not region: 
             return None
         
         monitor = {"top": int(region[1]), "left": int(region[0]), "width": int(region[2]), "height": int(region[3])}
+        
         try:
-            img = np.array(self.sct.grab(monitor))
-            img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
-            
-            # 记录这次截图的尺寸，证明截图成功了
-            h, w = img_bgr.shape[:2]
-            self.last_screenshot_shape = f"{w}x{h}"
-            
-            if debug_name:
-                cv2.imwrite(os.path.join(self.debug_dir, f"debug_{debug_name}.png"), img_bgr)
-            return img_bgr
+            # === 核心修复 ===
+            # 使用 with 语句，在当前线程内动态创建 mss 实例
+            # 用完即销毁，确保线程安全
+            with mss.mss() as sct:
+                img = np.array(sct.grab(monitor))
+                img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+                
+                # 记录这次截图的尺寸
+                h, w = img_bgr.shape[:2]
+                self.last_screenshot_shape = f"{w}x{h}"
+                
+                if debug_name:
+                    cv2.imwrite(os.path.join(self.debug_dir, f"debug_{debug_name}.png"), img_bgr)
+                return img_bgr
+                
         except Exception as e:
+            # 这里的错误信会非常具体
             self.last_error = f"截图失败: {str(e)}"
             return None
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
-        # 1. 检查截图
         if screen_img is None:
-            # 如果已有更具体的截图错误，用那个；否则认为是没画框
             err = self.last_error if self.last_error else "未获取到截图(区域未设置?)"
             return (err, 0.0) if return_max_val else False
             
-        # 2. 检查模板
         if not template_list:
             return ("无模板文件(请检查assets)", 0.0) if return_max_val else False
 
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
         max_score_found = 0.0
         
-        # 记录是否所有模板都因为尺寸问题被跳过
         all_skipped = True 
 
         for tmpl in template_list:
             tmpl_h, tmpl_w = tmpl.shape[:2]
             screen_h, screen_w = screen_gray.shape[:2]
             
-            # 尺寸保护
             if screen_h < tmpl_h or screen_w < tmpl_w:
                 continue 
             
-            all_skipped = False # 至少有一个模板尺寸是合适的
+            all_skipped = False 
 
             mask = None
             if tmpl.shape[2] == 4:
@@ -124,12 +125,10 @@ class VisionEngine:
             except:
                 continue
 
-        # 如果所有模板都被跳过，说明模板虽然有，但都比截图大
         if all_skipped:
             return ("所有模板均大于截图区域", 0.0) if return_max_val else False
 
         if return_max_val:
-            # 返回具体分数，没有错误字符串
             return (None, max_score_found)
         else:
             return max_score_found >= threshold
