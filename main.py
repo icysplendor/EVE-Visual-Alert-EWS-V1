@@ -15,6 +15,7 @@ from ui.selector import RegionSelector
 from core.audio_logic import AlarmWorker
 from core.i18n import Translator
 
+# === Hi-DPI Fix ===
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1) 
 except:
@@ -23,6 +24,7 @@ except:
     except:
         pass
 
+# === EVE Style CSS ===
 EVE_STYLE = """
 QMainWindow {
     background-color: #121212;
@@ -151,7 +153,7 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         
         self.setStyleSheet(EVE_STYLE)
-        self.resize(400, 560) # 稍微增加高度以容纳更多控件
+        self.resize(400, 550) # 稍微加高一点以容纳新的设置行
 
         self.i18n.callback = self.refresh_ui_text 
         saved_lang = self.cfg.get("language")
@@ -231,61 +233,56 @@ class MainWindow(QMainWindow):
         layout_cfg = QVBoxLayout()
         layout_cfg.setSpacing(6)
 
-        # Webhook (放最上面)
-        row_web = QHBoxLayout()
-        self.lbl_webhook = QLabel("Webhook:")
-        self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
-        self.line_webhook.textChanged.connect(lambda t: self.cfg.set("webhook_url", t))
-        row_web.addWidget(self.lbl_webhook)
-        row_web.addWidget(self.line_webhook)
-        layout_cfg.addLayout(row_web)
-
-        # === 修改点：三个独立的阈值设置 ===
-        # 使用 Grid 布局或者三个 HBox
-        thresholds = self.cfg.get("thresholds")
+        # === 修改点：三个阈值并排显示 ===
+        row_thresh = QHBoxLayout()
         
-        # Local Thresh
-        row_t1 = QHBoxLayout()
-        self.lbl_th_local = QLabel("Local Thresh:")
+        # 本地阈值
+        vbox1 = QVBoxLayout()
+        self.lbl_th_local = QLabel("Local %")
         self.spin_local = QDoubleSpinBox()
         self.spin_local.setRange(0.1, 1.0)
-        self.spin_local.setSingleStep(0.01) # 精度更高一点
-        self.spin_local.setValue(thresholds.get("local", 0.95))
+        self.spin_local.setSingleStep(0.01) # 允许更精细的调节
+        self.spin_local.setValue(self.cfg.get("thresholds").get("local", 0.95))
         self.spin_local.valueChanged.connect(lambda v: self.update_cfg("thresholds", "local", v))
-        self.spin_local.setFixedWidth(60)
-        row_t1.addWidget(self.lbl_th_local)
-        row_t1.addStretch()
-        row_t1.addWidget(self.spin_local)
-        layout_cfg.addLayout(row_t1)
-
-        # Overview Thresh
-        row_t2 = QHBoxLayout()
-        self.lbl_th_over = QLabel("Over Thresh:")
+        vbox1.addWidget(self.lbl_th_local)
+        vbox1.addWidget(self.spin_local)
+        
+        # 总览阈值
+        vbox2 = QVBoxLayout()
+        self.lbl_th_over = QLabel("Over %")
         self.spin_over = QDoubleSpinBox()
         self.spin_over.setRange(0.1, 1.0)
         self.spin_over.setSingleStep(0.01)
-        self.spin_over.setValue(thresholds.get("overview", 0.95))
+        self.spin_over.setValue(self.cfg.get("thresholds").get("overview", 0.95))
         self.spin_over.valueChanged.connect(lambda v: self.update_cfg("thresholds", "overview", v))
-        self.spin_over.setFixedWidth(60)
-        row_t2.addWidget(self.lbl_th_over)
-        row_t2.addStretch()
-        row_t2.addWidget(self.spin_over)
-        layout_cfg.addLayout(row_t2)
-
-        # Rat Thresh
-        row_t3 = QHBoxLayout()
-        self.lbl_th_npc = QLabel("Rat Thresh:")
+        vbox2.addWidget(self.lbl_th_over)
+        vbox2.addWidget(self.spin_over)
+        
+        # 怪物阈值
+        vbox3 = QVBoxLayout()
+        self.lbl_th_npc = QLabel("Rats %")
         self.spin_npc = QDoubleSpinBox()
         self.spin_npc.setRange(0.1, 1.0)
         self.spin_npc.setSingleStep(0.01)
-        self.spin_npc.setValue(thresholds.get("monster", 0.95))
+        self.spin_npc.setValue(self.cfg.get("thresholds").get("monster", 0.95))
         self.spin_npc.valueChanged.connect(lambda v: self.update_cfg("thresholds", "monster", v))
-        self.spin_npc.setFixedWidth(60)
-        row_t3.addWidget(self.lbl_th_npc)
-        row_t3.addStretch()
-        row_t3.addWidget(self.spin_npc)
-        layout_cfg.addLayout(row_t3)
-        # =================================
+        vbox3.addWidget(self.lbl_th_npc)
+        vbox3.addWidget(self.spin_npc)
+        
+        row_thresh.addLayout(vbox1)
+        row_thresh.addLayout(vbox2)
+        row_thresh.addLayout(vbox3)
+        layout_cfg.addLayout(row_thresh)
+        # ================================
+        
+        # Webhook
+        row2 = QHBoxLayout()
+        self.lbl_webhook = QLabel("Webhook:")
+        self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
+        self.line_webhook.textChanged.connect(lambda t: self.cfg.set("webhook_url", t))
+        row2.addWidget(self.lbl_webhook)
+        row2.addWidget(self.line_webhook)
+        layout_cfg.addLayout(row2)
 
         # 音频列表
         for key in ["local", "overview", "monster", "mixed"]:
@@ -316,7 +313,7 @@ class MainWindow(QMainWindow):
         
         self.btn_start = QPushButton("ENGAGE")
         self.btn_start.setObjectName("btn_start") 
-        self.btn_start.setFixedHeight(40)
+        self.btn_start.setFixedHeight(40) 
         self.btn_start.clicked.connect(self.toggle_monitoring)
         
         self.btn_debug = QPushButton("VIEW")
@@ -350,13 +347,12 @@ class MainWindow(QMainWindow):
         self.btn_set_overview.setText(_("btn_overview"))
         self.btn_set_npc.setText(_("btn_npc"))
         
-        self.lbl_webhook.setText(_("lbl_webhook"))
-        
-        # === 刷新新标签 ===
+        # 刷新新增加的三个阈值标签
         self.lbl_th_local.setText(_("lbl_th_local"))
         self.lbl_th_over.setText(_("lbl_th_over"))
         self.lbl_th_npc.setText(_("lbl_th_npc"))
-        # =================
+        
+        self.lbl_webhook.setText(_("lbl_webhook"))
         
         self.lbl_sound_local.setText(_("lbl_sound_local"))
         self.lbl_sound_overview.setText(_("lbl_sound_overview"))
