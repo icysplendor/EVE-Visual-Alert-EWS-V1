@@ -4,16 +4,19 @@ import os
 CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
-    "language": "CN", # 默认为中文
+    "language": "CN",
     "regions": {
         "local": None,
         "overview": None,
         "monster": None
     },
+    # === 修改点：拆分阈值，默认 0.95 ===
     "thresholds": {
-        "hostile": 0.85,
-        "monster": 0.85
+        "local": 0.95,
+        "overview": 0.95,
+        "monster": 0.95
     },
+    # ==================================
     "webhook_url": "",
     "audio_paths": {
         "local": "",
@@ -33,7 +36,6 @@ class ConfigManager:
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # 简单合并，防止新版本缺字段
                     for k, v in data.items():
                         if k in self.config:
                             if isinstance(v, dict):
@@ -41,7 +43,7 @@ class ConfigManager:
                             else:
                                 self.config[k] = v
             except:
-                print("加载配置文件失败，使用默认配置")
+                print("Config load failed, using defaults")
 
     def save(self):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
