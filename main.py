@@ -1,23 +1,11 @@
-# ================= 必须放在最开头 =================
-import ctypes
-import os
-try:
-    # 告诉 Windows 该程序支持高 DPI，防止坐标错位
-    ctypes.windll.shcore.SetProcessDpiAwareness(1) 
-except Exception:
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()
-    except Exception:
-        pass
-# =================================================
-
 import sys
+import os
+import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
-                             QGroupBox, QDoubleSpinBox, QLineEdit, QTextEdit, 
-                             QDialog, QGridLayout, QFrame)
+                             QGroupBox, QDoubleSpinBox, QLineEdit, QTextEdit, QDialog, QFrame)
 from PyQt6.QtCore import QTimer, Qt
-from PyQt6.QtGui import QPixmap, QImage, QFont
+from PyQt6.QtGui import QPixmap, QImage, QFont, QIcon
 from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtCore import QUrl
 
@@ -25,97 +13,121 @@ from core.config_manager import ConfigManager
 from core.vision import VisionEngine
 from ui.selector import RegionSelector
 from core.audio_logic import AlarmWorker
+from core.i18n import Translator
 
-# === EVE 风格样式表 ===
-STYLESHEET = """
+# === Hi-DPI Fix ===
+try:
+    ctypes.windll.shcore.SetProcessDpiAwareness(1) 
+except:
+    try:
+        ctypes.windll.user32.SetProcessDPIAware()
+    except:
+        pass
+
+# === EVE Style CSS ===
+EVE_STYLE = """
 QMainWindow {
     background-color: #121212;
 }
+QWidget {
+    font-family: "Segoe UI", "Arial", sans-serif;
+    font-size: 11px;
+    color: #cccccc;
+}
 QGroupBox {
-    border: 1px solid #3d3d3d;
-    border-radius: 4px;
-    margin-top: 20px;
+    border: 1px solid #444;
+    border-radius: 3px;
+    margin-top: 10px;
     font-weight: bold;
-    color: #e0e0e0;
+    color: #00bcd4; /* Cyan EVE Color */
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 0 5px;
+    padding: 0 3px;
     left: 10px;
-    color: #00e5ff; /* EVE Cyan */
 }
-QLabel {
-    color: #b0b0b0;
-    font-family: "Segoe UI", sans-serif;
-}
-QLineEdit, QDoubleSpinBox {
-    background-color: #1e1e1e;
-    border: 1px solid #3d3d3d;
-    color: #00ffaa;
+QPushButton {
+    background-color: #2a2a2a;
+    border: 1px solid #444;
+    color: #eee;
     padding: 4px;
     border-radius: 2px;
 }
-QPushButton {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
-    border: 1px solid #444;
-    padding: 6px;
-    border-radius: 2px;
-}
 QPushButton:hover {
-    background-color: #3d3d3d;
-    border-color: #00e5ff;
+    background-color: #3a3a3a;
+    border-color: #00bcd4;
 }
 QPushButton:pressed {
-    background-color: #00e5ff;
+    background-color: #00bcd4;
     color: #000;
 }
-/* 启动按钮特殊样式 */
-QPushButton#StartBtn {
-    background-color: #1a3300;
-    border: 1px solid #336600;
-    color: #ccff99;
+/* 特殊按钮样式：启动 */
+QPushButton#btn_start {
+    background-color: #1b3a2a;
+    border: 1px solid #2e7d32;
+    color: #4caf50;
     font-weight: bold;
-    font-size: 14px;
+    font-size: 12px;
 }
-QPushButton#StartBtn:checked {
-    background-color: #330000;
-    border: 1px solid #ff3333;
-    color: #ffcccc;
+QPushButton#btn_start:checked { /* 停止状态 */
+    background-color: #3b1a1a;
+    border: 1px solid #c62828;
+    color: #ef5350;
 }
-/* 日志区域 */
+QPushButton#btn_debug {
+    background-color: #1a2a3a;
+    border: 1px solid #0277bd;
+    color: #29b6f6;
+}
+QLineEdit, QDoubleSpinBox {
+    background-color: #000;
+    border: 1px solid #333;
+    color: #00bcd4;
+    padding: 2px;
+}
 QTextEdit {
-    background-color: #000000;
-    border: 1px solid #00e5ff;
-    color: #00ff00;
+    background-color: #080808;
+    border: 1px solid #333;
     font-family: "Consolas", "Courier New", monospace;
-    font-size: 11px;
+    font-size: 10px;
+    color: #aaa;
+}
+/* 滚动条美化 */
+QScrollBar:vertical {
+    border: none;
+    background: #111;
+    width: 8px;
+}
+QScrollBar::handle:vertical {
+    background: #333;
+    min-height: 20px;
 }
 """
 
 class DebugWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("EVE Sentry - 视觉调试")
-        self.setStyleSheet("background-color: #121212; color: #fff;")
+        self.setWindowTitle("VISUAL FEED")
+        self.setStyleSheet("background-color: #000; color: #00bcd4;")
         layout = QHBoxLayout()
+        layout.setContentsMargins(5,5,5,5)
         
-        self.lbl_local = self._create_monitor("Local")
-        self.lbl_overview = self._create_monitor("Overview")
-        self.lbl_monster = self._create_monitor("Monster")
-
-        layout.addWidget(self.lbl_local)
-        layout.addWidget(self.lbl_overview)
-        layout.addWidget(self.lbl_monster)
+        self.labels = {}
+        for key in ["Local", "Overview", "Npc"]:
+            vbox = QVBoxLayout()
+            lbl_title = QLabel(key.upper())
+            lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_img = QLabel()
+            lbl_img.setFixedSize(150, 150)
+            lbl_img.setStyleSheet("border: 1px solid #333; background: #111;")
+            lbl_img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vbox.addWidget(lbl_title)
+            vbox.addWidget(lbl_img)
+            layout.addLayout(vbox)
+            self.labels[key] = lbl_img
+            
         self.setLayout(layout)
-
-    def _create_monitor(self, title):
-        lbl = QLabel(title)
-        lbl.setFixedSize(200, 200)
-        lbl.setStyleSheet("border: 1px dashed #444; background: #000; color: #555;")
-        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        return lbl
 
     def update_images(self, img_local, img_overview, img_monster):
         def np2pixmap(np_img):
@@ -123,45 +135,50 @@ class DebugWindow(QDialog):
             h, w, ch = np_img.shape
             bytes_per_line = ch * w
             qimg = QImage(np_img.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
-            return QPixmap.fromImage(qimg).scaled(200, 200, Qt.AspectRatioMode.KeepAspectRatio)
+            return QPixmap.fromImage(qimg).scaled(150, 150, Qt.AspectRatioMode.KeepAspectRatio)
 
-        self.lbl_local.setPixmap(np2pixmap(img_local))
-        self.lbl_overview.setPixmap(np2pixmap(img_overview))
-        self.lbl_monster.setPixmap(np2pixmap(img_monster))
+        self.labels["Local"].setPixmap(np2pixmap(img_local))
+        self.labels["Overview"].setPixmap(np2pixmap(img_overview))
+        self.labels["Npc"].setPixmap(np2pixmap(img_monster))
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("EVE PRO SENTRY")
-        self.resize(380, 550) # 缩小窗口尺寸
-        
-        # 应用样式表
-        self.setStyleSheet(STYLESHEET)
-        
-        # 初始化核心
         self.cfg = ConfigManager()
         self.vision = VisionEngine()
         self.logic = AlarmWorker(self.cfg, self.vision)
-        self.logic.log_signal.connect(self.log)
+        self.i18n = Translator(self.refresh_ui_text) # 绑定刷新回调
         
+        # 恢复上次保存的语言
+        saved_lang = self.cfg.get("language")
+        if saved_lang:
+            self.i18n.set_language(saved_lang)
+
+        self.init_core()
+        self.setup_ui()
+        self.refresh_ui_text() # 第一次刷新文字
+        
+        # 应用样式
+        self.setStyleSheet(EVE_STYLE)
+        # 紧凑尺寸
+        self.resize(380, 520) 
+
+    def init_core(self):
         self.sounds = {} 
         self.load_sounds()
-
-        self.setup_ui()
-        
+        self.logic.log_signal.connect(self.log)
+        self.logic.log_signal.connect(self.handle_alarm_signal)
         self.debug_timer = QTimer()
         self.debug_timer.timeout.connect(self.update_debug_view)
         
-        self.logic.log_signal.connect(self.handle_alarm_signal)
-        self.check_auto_start()
+        # Auto Start Logic
+        QTimer.singleShot(1000, self.check_auto_start)
 
     def check_auto_start(self):
         regions = self.cfg.get("regions")
         if regions.get("local") is not None or regions.get("overview") is not None:
-            self.log(">> SYSTEM READY. AUTO-START INITIATED.")
+            self.log("Auto-Sequence Initiated...")
             self.toggle_monitoring()
-        else:
-            self.log(">> WAITING FOR CONFIGURATION...")
 
     def load_sounds(self):
         paths = self.cfg.get("audio_paths")
@@ -174,146 +191,164 @@ class MainWindow(QMainWindow):
                 self.sounds[key] = effect
 
     def setup_ui(self):
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        # 使用更紧凑的边距
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setSpacing(10)
+        self.central = QWidget()
+        self.setCentralWidget(self.central)
+        
+        # 主布局，紧凑模式
+        main_layout = QVBoxLayout(self.central)
+        main_layout.setSpacing(8)
         main_layout.setContentsMargins(10, 10, 10, 10)
 
-        # === 标题栏 (伪装成HUD风格) ===
-        title_box = QHBoxLayout()
-        lbl_title = QLabel("TACTICAL ALERT SYSTEM")
-        lbl_title.setStyleSheet("color: #00e5ff; font-weight: bold; font-size: 16px; letter-spacing: 2px;")
-        title_box.addWidget(lbl_title)
-        title_box.addStretch()
-        main_layout.addLayout(title_box)
-
-        # === 区域设置 (网格布局) ===
-        grp_region = QGroupBox("SCAN SECTORS")
-        # 横向排列，减少垂直占用
-        grid_region = QGridLayout()
-        grid_region.setSpacing(5)
+        # === 顶部: 标题 + 语言切换 ===
+        top_layout = QHBoxLayout()
+        self.lbl_title = QLabel("EVE WARNING")
+        self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #fff;")
         
-        self.btns_region = {}
-        for idx, key in enumerate(["local", "overview", "monster"]):
-            # 简化按钮文字：L-Area, O-Area, M-Area
-            display_name = f"{key.upper()} AREA"
-            btn = QPushButton(display_name)
-            btn.setFixedHeight(30)
+        self.btn_lang = QPushButton("EN")
+        self.btn_lang.setFixedSize(30, 20)
+        self.btn_lang.clicked.connect(self.toggle_language)
+        
+        top_layout.addWidget(self.lbl_title)
+        top_layout.addStretch()
+        top_layout.addWidget(self.btn_lang)
+        main_layout.addLayout(top_layout)
+
+        # === 区域设置 (一行三个小按钮) ===
+        self.grp_monitor = QGroupBox("Monitoring Sectors")
+        layout_mon = QHBoxLayout()
+        layout_mon.setSpacing(5)
+        
+        self.btn_set_local = QPushButton("Local")
+        self.btn_set_overview = QPushButton("Overview")
+        self.btn_set_npc = QPushButton("Rats")
+        
+        for btn, key in [(self.btn_set_local, "local"), 
+                         (self.btn_set_overview, "overview"), 
+                         (self.btn_set_npc, "monster")]:
+            btn.setFixedHeight(25)
             btn.clicked.connect(lambda _, k=key: self.start_region_selection(k))
-            # 根据是否已配置，改变边框颜色（视觉反馈）
-            if self.cfg.get("regions").get(key):
-                btn.setStyleSheet("border-color: #00ffaa; color: #00ffaa;")
-            self.btns_region[key] = btn
+            layout_mon.addWidget(btn)
             
-            # 放在一行
-            grid_region.addWidget(btn, 0, idx)
-            
-        grp_region.setLayout(grid_region)
-        main_layout.addWidget(grp_region)
-        
-        # === 核心配置 ===
-        grp_config = QGroupBox("PARAMETERS")
-        flow_layout = QGridLayout()
-        flow_layout.setVerticalSpacing(8)
+        self.grp_monitor.setLayout(layout_mon)
+        main_layout.addWidget(self.grp_monitor)
 
-        # 阈值设置
-        lbl_th = QLabel("HOSTILE THRESHOLD:")
-        spin_hostile = QDoubleSpinBox()
-        spin_hostile.setRange(0.1, 1.0)
-        spin_hostile.setSingleStep(0.05)
-        spin_hostile.setValue(self.cfg.get("thresholds")["hostile"])
-        spin_hostile.valueChanged.connect(lambda v: self.update_threshold("hostile", v))
-        spin_hostile.setFixedWidth(60)
-        
-        flow_layout.addWidget(lbl_th, 0, 0)
-        flow_layout.addWidget(spin_hostile, 0, 1)
+        # === 参数与音频配置 ===
+        self.grp_config = QGroupBox("Configuration")
+        layout_cfg = QVBoxLayout()
+        layout_cfg.setSpacing(5)
 
-        # Webhook
-        lbl_hook = QLabel("WEBHOOK:")
+        # 阈值 & Webhook
+        row1 = QHBoxLayout()
+        self.lbl_thresh = QLabel("Threshold:")
+        self.spin_hostile = QDoubleSpinBox()
+        self.spin_hostile.setRange(0.1, 1.0)
+        self.spin_hostile.setSingleStep(0.05)
+        self.spin_hostile.setValue(self.cfg.get("thresholds")["hostile"])
+        self.spin_hostile.valueChanged.connect(lambda v: self.update_cfg("thresholds", "hostile", v))
+        self.spin_hostile.setFixedWidth(50)
+        
+        row1.addWidget(self.lbl_thresh)
+        row1.addWidget(self.spin_hostile)
+        layout_cfg.addLayout(row1)
+        
+        row2 = QHBoxLayout()
+        self.lbl_webhook = QLabel("Webhook:")
         self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
-        self.line_webhook.setPlaceholderText("Discord/Slack URL...")
         self.line_webhook.textChanged.connect(lambda t: self.cfg.set("webhook_url", t))
+        row2.addWidget(self.lbl_webhook)
+        row2.addWidget(self.line_webhook)
+        layout_cfg.addLayout(row2)
+
+        # 音频选择 (简化显示)
+        # 做成Grid，左边标签，右边按钮
+        for key in ["local", "overview", "monster", "mixed"]:
+            row = QHBoxLayout()
+            lbl = QLabel(f"{key}:")
+            # 存储引用以便翻译
+            setattr(self, f"lbl_sound_{key}", lbl) 
+            
+            # 显示文件名的Label (淡色)
+            path_val = self.cfg.get("audio_paths").get(key, "")
+            fname = os.path.basename(path_val) if path_val else "---"
+            lbl_file = QLabel(fname)
+            lbl_file.setStyleSheet("color: #666;")
+            
+            btn_sel = QPushButton("...")
+            btn_sel.setFixedSize(25, 20)
+            btn_sel.clicked.connect(lambda _, k=key, l=lbl_file: self.select_audio(k, l))
+            
+            row.addWidget(lbl)
+            row.addWidget(lbl_file)
+            row.addStretch()
+            row.addWidget(btn_sel)
+            layout_cfg.addLayout(row)
+
+        self.grp_config.setLayout(layout_cfg)
+        main_layout.addWidget(self.grp_config)
+
+        # === 主控制按钮区 ===
+        layout_ctrl = QHBoxLayout()
         
-        flow_layout.addWidget(lbl_hook, 1, 0)
-        flow_layout.addWidget(self.line_webhook, 1, 1)
-
-        grp_config.setLayout(flow_layout)
-        main_layout.addWidget(grp_config)
-
-        # === 音频设置 (紧凑版) ===
-        grp_audio = QGroupBox("AUDIO FEED")
-        grid_audio = QGridLayout()
-        grid_audio.setVerticalSpacing(4)
-        
-        self.audio_status_labels = {}
-
-        # 2x2 布局
-        audio_keys = ["local", "overview", "monster", "mixed"]
-        for idx, key in enumerate(audio_keys):
-            row = idx // 2
-            col = idx % 2
-            
-            container = QWidget()
-            h_layout = QHBoxLayout(container)
-            h_layout.setContentsMargins(0,0,0,0)
-            h_layout.setSpacing(5)
-            
-            btn_load = QPushButton(key.upper())
-            btn_load.setToolTip(f"Set sound for {key}")
-            btn_load.setFixedWidth(80)
-            
-            # 状态指示灯 (小圆点或文字)
-            lbl_status = QLabel("OFF")
-            lbl_status.setStyleSheet("color: #555; font-size: 10px;")
-            self.audio_status_labels[key] = lbl_status
-            
-            # 初始化状态颜色
-            if self.cfg.get("audio_paths").get(key):
-                lbl_status.setText("RDY")
-                lbl_status.setStyleSheet("color: #00ffaa; font-weight:bold; font-size: 10px;")
-            
-            btn_load.clicked.connect(lambda _, k=key: self.select_audio(k))
-            
-            h_layout.addWidget(btn_load)
-            h_layout.addWidget(lbl_status)
-            h_layout.addStretch()
-            
-            grid_audio.addWidget(container, row, col)
-
-        grp_audio.setLayout(grid_audio)
-        main_layout.addWidget(grp_audio)
-
-        # === 底部控制栏 ===
-        ctrl_layout = QHBoxLayout()
-        
-        self.btn_start = QPushButton("START SYSTEM")
-        self.btn_start.setObjectName("StartBtn") # 绑定特殊的QSSID
-        self.btn_start.setCheckable(True) # 变成开关样式
-        self.btn_start.setFixedHeight(45)
+        self.btn_start = QPushButton("ENGAGE")
+        self.btn_start.setObjectName("btn_start") # 用于CSS
+        self.btn_start.setFixedHeight(35)
         self.btn_start.clicked.connect(self.toggle_monitoring)
         
-        self.btn_debug = QPushButton("👁") # 仅用图标节省空间
-        self.btn_debug.setFixedSize(45, 45)
-        self.btn_debug.setToolTip("Open Visual Debugger")
-        self.btn_debug.setStyleSheet("font-size: 20px; border-radius: 4px;")
+        self.btn_debug = QPushButton("VISUAL")
+        self.btn_debug.setObjectName("btn_debug")
+        self.btn_debug.setFixedSize(60, 35)
         self.btn_debug.clicked.connect(self.show_debug_window)
         
-        ctrl_layout.addWidget(self.btn_start)
-        ctrl_layout.addWidget(self.btn_debug)
-        main_layout.addLayout(ctrl_layout)
+        layout_ctrl.addWidget(self.btn_start)
+        layout_ctrl.addWidget(self.btn_debug)
+        main_layout.addLayout(layout_ctrl)
 
-        # === 日志终端 ===
+        # === 日志区 ===
         self.txt_log = QTextEdit()
         self.txt_log.setReadOnly(True)
-        # 固定高度，像一个控制台窗口
-        self.txt_log.setFixedHeight(120) 
-        self.txt_log.document().setMaximumBlockCount(200) 
+        self.txt_log.setFrameShape(QFrame.Shape.NoFrame)
         main_layout.addWidget(self.txt_log)
         
         self.debug_window = DebugWindow(self)
+        self.log(self.i18n.get("log_ready"))
 
+    def refresh_ui_text(self):
+        """核心方法：根据当前语言刷新所有界面文字"""
+        _ = self.i18n.get
+        
+        self.setWindowTitle(_("window_title"))
+        self.lbl_title.setText(_("window_title"))
+        
+        self.grp_monitor.setTitle(_("grp_monitor"))
+        self.grp_config.setTitle(_("grp_config"))
+        
+        self.btn_set_local.setText(_("btn_local"))
+        self.btn_set_overview.setText(_("btn_overview"))
+        self.btn_set_npc.setText(_("btn_npc"))
+        
+        self.lbl_thresh.setText(_("lbl_threshold"))
+        self.lbl_webhook.setText(_("lbl_webhook"))
+        
+        self.lbl_sound_local.setText(_("lbl_sound_local"))
+        self.lbl_sound_overview.setText(_("lbl_sound_overview"))
+        self.lbl_sound_monster.setText(_("lbl_sound_npc"))
+        self.lbl_sound_mixed.setText(_("lbl_sound_mixed"))
+        
+        if not self.logic.running:
+            self.btn_start.setText(_("btn_start"))
+        else:
+            self.btn_start.setText(_("btn_stop"))
+            
+        self.btn_debug.setText(_("btn_debug"))
+        self.btn_lang.setText(_("btn_lang"))
+
+    def toggle_language(self):
+        self.i18n.toggle()
+        # 保存设置
+        self.cfg.set("language", self.i18n.lang)
+
+    # ... (以下方法逻辑保持不变，只需微调日志输出) ...
+    
     def start_region_selection(self, key):
         self.selector = RegionSelector()
         self.selector.selection_finished.connect(lambda rect: self.save_region(key, rect))
@@ -323,60 +358,52 @@ class MainWindow(QMainWindow):
         regions = self.cfg.get("regions")
         regions[key] = list(rect)
         self.cfg.set("regions", regions)
-        self.log(f">> REGION SET [{key.upper()}]: {rect}")
-        # 更新按钮样式表示已设置
-        if key in self.btns_region:
-             self.btns_region[key].setStyleSheet("border-color: #00ffaa; color: #00ffaa;")
+        self.log(f"{self.i18n.get('region_updated')}: {key.upper()}")
 
-    def update_threshold(self, key, val):
-        t = self.cfg.get("thresholds")
+    def update_cfg(self, section, key, val):
+        t = self.cfg.get(section)
         t[key] = val
-        self.cfg.set("thresholds", t)
+        self.cfg.set(section, t)
 
-    def select_audio(self, key):
+    def select_audio(self, key, label_widget):
         fname, _ = QFileDialog.getOpenFileName(self, "Load Audio", "", "Audio (*.wav *.mp3)")
         if fname:
             paths = self.cfg.get("audio_paths")
             paths[key] = fname
             self.cfg.set("audio_paths", paths)
+            label_widget.setText(os.path.basename(fname))
             self.load_sounds()
-            # 更新UI状态
-            lbl = self.audio_status_labels.get(key)
-            if lbl:
-                lbl.setText("RDY")
-                lbl.setStyleSheet("color: #00ffaa; font-weight:bold; font-size: 10px;")
 
     def toggle_monitoring(self):
-        # 按钮状态由 logic 驱动，或者这里驱动 logic
+        _ = self.i18n.get
         if not self.logic.running:
             regions = self.cfg.get("regions")
             if not regions.get("local") and not regions.get("overview"):
-                self.log(">> ERROR: NO REGION CONFIGURED.")
-                self.btn_start.setChecked(False)
+                self.log(_("log_region_err"))
                 return
 
             self.logic.start()
-            self.btn_start.setText("SYSTEM ACTIVE")
-            self.btn_start.setChecked(True) # 保持按下状态
-            self.log(">> MONITORING STARTED")
+            self.btn_start.setText(_("btn_stop"))
+            self.btn_start.setChecked(True) # 改变样式
+            self.log(_("log_start"))
         else:
             self.logic.stop()
-            self.btn_start.setText("START SYSTEM")
+            self.btn_start.setText(_("btn_start"))
             self.btn_start.setChecked(False)
-            self.log(">> MONITORING STOPPED")
+            self.log(_("log_stop"))
 
     def handle_alarm_signal(self, msg):
-        self.log(msg)
-        if "⚠️ 触发:" in msg:
-            try:
-                parts = msg.split("⚠️ 触发:")
-                if len(parts) > 1:
-                    sound_type = parts[1].strip().split()[0].lower()
-                    if sound_type in self.sounds:
-                        effect = self.sounds[sound_type]
+        # 注意：这里我们接收到的是 logic 层发来的原始字符串
+        # 暂时不翻译日志里的动态分析数据，只翻译 UI
+        if "⚠️" in msg:
+            # 简单的解析逻辑，兼容中文和英文环境的底层逻辑
+            for keyword in ["mixed", "overview", "local", "monster"]:
+                if keyword.upper() in msg.upper():
+                    if keyword in self.sounds:
+                        effect = self.sounds[keyword]
                         if not effect.isPlaying():
                             effect.play()
-            except: pass
+                    break
 
     def show_debug_window(self):
         self.debug_window.show()
@@ -386,7 +413,6 @@ class MainWindow(QMainWindow):
         if not self.debug_window.isVisible():
             self.debug_timer.stop()
             return
-        
         regions = self.cfg.get("regions")
         img_local = self.vision.capture_screen(regions.get("local"))
         img_overview = self.vision.capture_screen(regions.get("overview"))
@@ -394,19 +420,12 @@ class MainWindow(QMainWindow):
         self.debug_window.update_images(img_local, img_overview, img_monster)
 
     def log(self, text):
-        # 移除过多的时间戳，因为 audio_logic 已经带了
-        # 这里只做格式化
-        clean_text = text.replace("⚠️", "[ALERT]").replace("✅", "[SAFE]")
-        self.txt_log.append(clean_text)
+        self.txt_log.append(text)
         sb = self.txt_log.verticalScrollBar()
         sb.setValue(sb.maximum())
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    # 设置全局字体
-    font = QFont("Segoe UI", 9)
-    app.setFont(font)
-    
     win = MainWindow()
     win.show()
     sys.exit(app.exec())
