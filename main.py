@@ -15,7 +15,6 @@ from ui.selector import RegionSelector
 from core.audio_logic import AlarmWorker
 from core.i18n import Translator
 
-# === Hi-DPI Fix ===
 try:
     ctypes.windll.shcore.SetProcessDpiAwareness(1) 
 except:
@@ -24,13 +23,12 @@ except:
     except:
         pass
 
-# === EVE Style CSS ===
 EVE_STYLE = """
 QMainWindow {
     background-color: #121212;
 }
 QWidget {
-    font-family: "Segoe UI", "Microsoft YaHei", sans-serif; /* 增加微软雅黑支持中文 */
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
     font-size: 11px;
     color: #cccccc;
 }
@@ -62,7 +60,6 @@ QPushButton:pressed {
     background-color: #00bcd4;
     color: #000;
 }
-/* 特殊按钮样式：启动 */
 QPushButton#btn_start {
     background-color: #1b3a2a;
     border: 1px solid #2e7d32;
@@ -114,7 +111,6 @@ class DebugWindow(QDialog):
         layout.setContentsMargins(5,5,5,5)
         
         self.labels = {}
-        # 注意：这里的标题只是显示用，不需要翻译太复杂
         for key in ["Local", "Overview", "Npc"]:
             vbox = QVBoxLayout()
             lbl_title = QLabel(key.upper())
@@ -146,21 +142,17 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         
-        # 1. 初始化核心逻辑
         self.cfg = ConfigManager()
         self.vision = VisionEngine()
         self.logic = AlarmWorker(self.cfg, self.vision)
         self.i18n = Translator(None) 
         
-        # 2. 建立 UI
         self.init_core()
         self.setup_ui()
         
-        # 3. 样式与尺寸 (稍微加宽一点适应英文)
         self.setStyleSheet(EVE_STYLE)
-        self.resize(400, 520) 
+        self.resize(400, 560) # 稍微增加高度以容纳更多控件
 
-        # 4. 绑定回调并刷新
         self.i18n.callback = self.refresh_ui_text 
         saved_lang = self.cfg.get("language")
         if saved_lang:
@@ -227,7 +219,7 @@ class MainWindow(QMainWindow):
         for btn, key in [(self.btn_set_local, "local"), 
                          (self.btn_set_overview, "overview"), 
                          (self.btn_set_npc, "monster")]:
-            btn.setFixedHeight(28) # 稍微加高一点
+            btn.setFixedHeight(28)
             btn.clicked.connect(lambda _, k=key: self.start_region_selection(k))
             layout_mon.addWidget(btn)
             
@@ -239,28 +231,61 @@ class MainWindow(QMainWindow):
         layout_cfg = QVBoxLayout()
         layout_cfg.setSpacing(6)
 
-        # 阈值
-        row1 = QHBoxLayout()
-        self.lbl_thresh = QLabel("Threshold:")
-        self.spin_hostile = QDoubleSpinBox()
-        self.spin_hostile.setRange(0.1, 1.0)
-        self.spin_hostile.setSingleStep(0.05)
-        self.spin_hostile.setValue(self.cfg.get("thresholds")["hostile"])
-        self.spin_hostile.valueChanged.connect(lambda v: self.update_cfg("thresholds", "hostile", v))
-        self.spin_hostile.setFixedWidth(55)
-        row1.addWidget(self.lbl_thresh)
-        row1.addWidget(self.spin_hostile)
-        row1.addStretch() # 靠左对齐
-        layout_cfg.addLayout(row1)
-        
-        # Webhook
-        row2 = QHBoxLayout()
+        # Webhook (放最上面)
+        row_web = QHBoxLayout()
         self.lbl_webhook = QLabel("Webhook:")
         self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
         self.line_webhook.textChanged.connect(lambda t: self.cfg.set("webhook_url", t))
-        row2.addWidget(self.lbl_webhook)
-        row2.addWidget(self.line_webhook)
-        layout_cfg.addLayout(row2)
+        row_web.addWidget(self.lbl_webhook)
+        row_web.addWidget(self.line_webhook)
+        layout_cfg.addLayout(row_web)
+
+        # === 修改点：三个独立的阈值设置 ===
+        # 使用 Grid 布局或者三个 HBox
+        thresholds = self.cfg.get("thresholds")
+        
+        # Local Thresh
+        row_t1 = QHBoxLayout()
+        self.lbl_th_local = QLabel("Local Thresh:")
+        self.spin_local = QDoubleSpinBox()
+        self.spin_local.setRange(0.1, 1.0)
+        self.spin_local.setSingleStep(0.01) # 精度更高一点
+        self.spin_local.setValue(thresholds.get("local", 0.95))
+        self.spin_local.valueChanged.connect(lambda v: self.update_cfg("thresholds", "local", v))
+        self.spin_local.setFixedWidth(60)
+        row_t1.addWidget(self.lbl_th_local)
+        row_t1.addStretch()
+        row_t1.addWidget(self.spin_local)
+        layout_cfg.addLayout(row_t1)
+
+        # Overview Thresh
+        row_t2 = QHBoxLayout()
+        self.lbl_th_over = QLabel("Over Thresh:")
+        self.spin_over = QDoubleSpinBox()
+        self.spin_over.setRange(0.1, 1.0)
+        self.spin_over.setSingleStep(0.01)
+        self.spin_over.setValue(thresholds.get("overview", 0.95))
+        self.spin_over.valueChanged.connect(lambda v: self.update_cfg("thresholds", "overview", v))
+        self.spin_over.setFixedWidth(60)
+        row_t2.addWidget(self.lbl_th_over)
+        row_t2.addStretch()
+        row_t2.addWidget(self.spin_over)
+        layout_cfg.addLayout(row_t2)
+
+        # Rat Thresh
+        row_t3 = QHBoxLayout()
+        self.lbl_th_npc = QLabel("Rat Thresh:")
+        self.spin_npc = QDoubleSpinBox()
+        self.spin_npc.setRange(0.1, 1.0)
+        self.spin_npc.setSingleStep(0.01)
+        self.spin_npc.setValue(thresholds.get("monster", 0.95))
+        self.spin_npc.valueChanged.connect(lambda v: self.update_cfg("thresholds", "monster", v))
+        self.spin_npc.setFixedWidth(60)
+        row_t3.addWidget(self.lbl_th_npc)
+        row_t3.addStretch()
+        row_t3.addWidget(self.spin_npc)
+        layout_cfg.addLayout(row_t3)
+        # =================================
 
         # 音频列表
         for key in ["local", "overview", "monster", "mixed"]:
@@ -291,12 +316,11 @@ class MainWindow(QMainWindow):
         
         self.btn_start = QPushButton("ENGAGE")
         self.btn_start.setObjectName("btn_start") 
-        self.btn_start.setFixedHeight(40) # 加大尺寸
+        self.btn_start.setFixedHeight(40)
         self.btn_start.clicked.connect(self.toggle_monitoring)
         
         self.btn_debug = QPushButton("VIEW")
         self.btn_debug.setObjectName("btn_debug")
-        # 修改点：宽度加到 90，确保 LIVE VIEW 放得下
         self.btn_debug.setFixedSize(90, 40) 
         self.btn_debug.clicked.connect(self.show_debug_window)
         
@@ -326,8 +350,13 @@ class MainWindow(QMainWindow):
         self.btn_set_overview.setText(_("btn_overview"))
         self.btn_set_npc.setText(_("btn_npc"))
         
-        self.lbl_thresh.setText(_("lbl_threshold"))
         self.lbl_webhook.setText(_("lbl_webhook"))
+        
+        # === 刷新新标签 ===
+        self.lbl_th_local.setText(_("lbl_th_local"))
+        self.lbl_th_over.setText(_("lbl_th_over"))
+        self.lbl_th_npc.setText(_("lbl_th_npc"))
+        # =================
         
         self.lbl_sound_local.setText(_("lbl_sound_local"))
         self.lbl_sound_overview.setText(_("lbl_sound_overview"))
