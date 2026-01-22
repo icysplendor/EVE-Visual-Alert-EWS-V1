@@ -14,10 +14,12 @@ class AlarmWorker(QObject):
         self.running = False
         self.thread = None
         self.status = {"local": False, "overview": False, "monster": False}
+        self.first_run = True # 标记符，用于这是不是第一次运行
 
     def start(self):
         if not self.running:
             self.running = True
+            self.first_run = True # 重置标记
             self.thread = threading.Thread(target=self._loop, daemon=True)
             self.thread.start()
 
@@ -28,27 +30,39 @@ class AlarmWorker(QObject):
 
     def _loop(self):
         while self.running:
-            now_str = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+            now_str = datetime.now().strftime("%H:%M:%S")
             
+            # === [新增] 系统自检报告 (仅第一次运行输出) ===
+            if self.first_run:
+                self.vision.load_templates() # 强制运行一次加载，确保状态最新
+                report = (
+                    f"--- 系统自检报告 ---\n"
+                    f"{self.vision.template_status_msg}\n"
+                    f"--------------------"
+                )
+                self.log_signal.emit(report)
+                self.first_run = False
+                time.sleep(1) # 停顿一下让人看清
+            # ==========================================
+
             regions = self.cfg.get("regions")
             t_hostile = self.cfg.get("thresholds")["hostile"]
             t_monster = self.cfg.get("thresholds")["monster"]
 
-            # 调试名称
+            # 截图 (带 debug_name)
             img_local = self.vision.capture_screen(regions.get("local"), "local")
             img_overview = self.vision.capture_screen(regions.get("overview"), "overview")
             img_monster = self.vision.capture_screen(regions.get("monster"), "monster")
 
-            # 匹配
-            is_local, score_local = self.vision.match_templates(img_local, self.vision.hostile_templates, t_hostile, True)
-            # 获取 local 匹配时的错误
-            err_local = self.vision.last_error 
-            
-            is_overview, score_overview = self.vision.match_templates(img_overview, self.vision.hostile_templates, t_hostile, True)
-            err_overview = self.vision.last_error
+            # 匹配逻辑 (注意现在的 match_templates 返回的是 (ErrorMsg/None, Score))
+            def process_match(img, templates, thresh):
+                err_msg, score = self.vision.match_templates(img, templates, thresh, True)
+                is_hit = score >= thresh
+                return is_hit, score, err_msg
 
-            is_monster, score_monster = self.vision.match_templates(img_monster, self.vision.monster_templates, t_monster, True)
-            err_monster = self.vision.last_error
+            is_local, score_local, err_local = process_match(img_local, self.vision.hostile_templates, t_hostile)
+            is_overview, score_overview, err_overview = process_match(img_overview, self.vision.hostile_templates, t_hostile)
+            is_monster, score_monster, err_monster = process_match(img_monster, self.vision.monster_templates, t_monster)
 
             self.status["local"] = is_local
             self.status["overview"] = is_overview
@@ -62,15 +76,14 @@ class AlarmWorker(QObject):
             elif is_local: sound_to_play = "local"
             elif is_monster: sound_to_play = "monster"
 
-            # === 构建带错误诊断的日志 ===
-            def fmt_score(score, err):
-                if score == 0.0 and err:
-                    return f"❌{err}" # 如果是0分且有错，显示错误原因
+            # 格式化分数与错误
+            def fmt(score, err):
+                if err: return f"❌{err}" # 如果有具体错误(无模板/截图失败)，显示错误
                 return f"{score:.2f}"
 
-            status_desc = (f"[L:{int(is_local)}({fmt_score(score_local, err_local)}) | "
-                           f"O:{int(is_overview)}({fmt_score(score_overview, err_overview)}) | "
-                           f"M:{int(is_monster)}({fmt_score(score_monster, err_monster)})]")
+            status_desc = (f"[L:{int(is_local)}({fmt(score_local, err_local)}) | "
+                           f"O:{int(is_overview)}({fmt(score_overview, err_overview)}) | "
+                           f"M:{int(is_monster)}({fmt(score_monster, err_monster)})]")
             
             if sound_to_play:
                 log_msg = f"[{now_str}] ⚠️ 触发: {sound_to_play.upper()} {status_desc}"
