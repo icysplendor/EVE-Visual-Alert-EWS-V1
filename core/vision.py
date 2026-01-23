@@ -49,10 +49,8 @@ class VisionEngine:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
                 try:
-                    # 必须保留 Alpha 通道 (IMREAD_UNCHANGED)
                     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                     if img is not None:
-                        # 如果是JPG没有透明通道，强制加一个全不透明的通道
                         if img.shape[2] == 3:
                             img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
                         templates.append(img)
@@ -70,8 +68,6 @@ class VisionEngine:
         try:
             with mss.mss() as sct:
                 img = np.array(sct.grab(monitor))
-                # mss 返回 BGRA
-                # 为了后续处理方便，我们转为 BGR，因为归一化通常在 BGR 或 Gray 上做
                 img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 
                 h, w = img_bgr.shape[:2]
@@ -87,7 +83,7 @@ class VisionEngine:
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
         """
-        参考用户提供的方案：回归 TM_CCOEFF_NORMED + 归一化预处理
+        修正版：增加防 Inf/Nan 检查的归一化匹配
         """
         if screen_img is None:
             err = self.last_error if self.last_error else "未获取到截图"
@@ -98,9 +94,17 @@ class VisionEngine:
 
         screen_h, screen_w = screen_img.shape[:2]
         
-        # === 关键步骤 1: 截图归一化 ===
-        # 将截图的对比度拉伸到 0-255，消除整体变灰/变亮的影响
-        screen_norm = cv2.normalize(screen_img, None, 0, 255, cv2.NORM_MINMAX)
+        # === 防御性检查 1: 截图是否纯色 ===
+        # 计算标准差，如果标准差为0，说明是纯色图，没有信息量，归一化会除以零
+        mean, std_dev = cv2.meanStdDev(screen_img)
+        if np.sum(std_dev) < 1.0: # 几乎是纯色
+             return ("区域无内容(纯色)", 0.0) if return_max_val else False
+
+        # === 归一化截图 ===
+        try:
+            screen_norm = cv2.normalize(screen_img, None, 0, 255, cv2.NORM_MINMAX)
+        except:
+            return ("归一化失败", 0.0) if return_max_val else False
         
         max_score_found = 0.0
         all_skipped = True 
@@ -108,7 +112,6 @@ class VisionEngine:
         for tmpl in template_list:
             tmpl_h, tmpl_w = tmpl.shape[:2]
             
-            # 尺寸检查
             if screen_h < tmpl_h or screen_w < tmpl_w:
                 continue 
             all_skipped = False 
@@ -116,19 +119,20 @@ class VisionEngine:
             # 准备数据
             mask = None
             if tmpl.shape[2] == 4:
-                # 移除 Alpha 通道，转为 BGR 用于归一化
                 tmpl_bgr = cv2.cvtColor(tmpl, cv2.COLOR_BGRA2BGR)
-                # 提取 Mask
                 mask = tmpl[:, :, 3]
             else:
                 tmpl_bgr = tmpl
             
-            # === 关键步骤 2: 模板归一化 ===
+            # === 防御性检查 2: 模板是否纯色 ===
+            mean_t, std_dev_t = cv2.meanStdDev(tmpl_bgr)
+            if np.sum(std_dev_t) < 1.0:
+                continue # 跳过无效模板
+
+            # === 归一化模板 ===
             tmpl_norm = cv2.normalize(tmpl_bgr, None, 0, 255, cv2.NORM_MINMAX)
 
             try:
-                # === 核心算法：TM_CCOEFF_NORMED ===
-                # 使用归一化后的图片进行匹配
                 if mask is not None:
                     res = cv2.matchTemplate(screen_norm, tmpl_norm, cv2.TM_CCOEFF_NORMED, mask=mask)
                 else:
@@ -136,11 +140,14 @@ class VisionEngine:
                 
                 _, max_val, _, _ = cv2.minMaxLoc(res)
                 
+                # === 防御性检查 3: 检查结果是否为 Inf 或 Nan ===
+                if np.isinf(max_val) or np.isnan(max_val):
+                    max_val = 0.0
+                
                 if max_val > max_score_found:
                     max_score_found = max_val
 
             except Exception as e:
-                # print(f"Error: {e}")
                 continue
 
         if all_skipped:
