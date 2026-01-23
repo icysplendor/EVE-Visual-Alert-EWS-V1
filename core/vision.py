@@ -14,7 +14,8 @@ class VisionEngine:
         self.last_error = None
         
         # 初始化 CLAHE
-        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        # clipLimit 稍微调低一点 (2.0 -> 1.5)，防止过度放大噪声
+        self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8,8))
             
         self.load_templates()
 
@@ -50,12 +51,48 @@ class VisionEngine:
                 try:
                     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                     if img is not None:
-                        if img.shape[2] == 3:
-                            img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-                        templates.append(img)
+                        # 预处理模板：确保模板也经过同样的 Gamma 和 CLAHE 处理
+                        if img.shape[2] == 4:
+                            b, g, r, a = cv2.split(img)
+                            gray = cv2.cvtColor(cv2.merge([b,g,r]), cv2.COLOR_BGR2GRAY)
+                            processed = self.preprocess_image(gray)
+                            templates.append((processed, a))
+                        else:
+                            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                            processed = self.preprocess_image(gray)
+                            templates.append((processed, None))
                 except:
                     pass
         return templates
+
+    def apply_gamma(self, image, gamma=1.0):
+        """
+        Gamma 校正：
+        Gamma > 1.0: 压暗阴影 (消除背景噪声)
+        Gamma < 1.0: 提亮阴影
+        我们这里使用 Gamma > 1 来压制 EVE 的深色星空背景
+        """
+        invGamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** invGamma) * 255
+            for i in np.arange(0, 256)]).astype("uint8")
+        return cv2.LUT(image, table)
+
+    def preprocess_image(self, gray_img):
+        """
+        统一的图像预处理流水线
+        """
+        # 1. Gamma 校正：压暗背景，突出高亮图标
+        # 1.5 是一个经验值，能有效把深灰色背景压成接近纯黑
+        gamma_corrected = self.apply_gamma(gray_img, gamma=1.5)
+        
+        # 2. 简单的阈值截断：把低于 30 的像素直接置为 0
+        # 这能彻底杀死微弱的星光噪点
+        _, thresholded = cv2.threshold(gamma_corrected, 30, 255, cv2.THRESH_TOZERO)
+        
+        # 3. CLAHE 增强：增强剩余有效像素的对比度
+        enhanced = self.clahe.apply(thresholded)
+        
+        return enhanced
 
     def capture_screen(self, region, debug_name=None):
         self.last_error = None
@@ -72,22 +109,12 @@ class VisionEngine:
                 h, w = img_bgr.shape[:2]
                 self.last_screenshot_shape = f"{w}x{h}"
                 
-                # 不再保存硬盘，直接返回内存对象
+                # 内存返回，不写盘
                 return img_bgr
                 
         except Exception as e:
             self.last_error = f"截图失败: {str(e)}"
             return None
-
-    def gamma_correction(self, img, gamma=1.5):
-        """
-        Gamma 校正：
-        Gamma > 1.0 会让暗部更暗，亮部保持。
-        这能有效压制归一化带来的背景噪点。
-        """
-        invGamma = 1.0 / gamma
-        table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-        return cv2.LUT(img, table)
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
         if screen_img is None:
@@ -99,44 +126,25 @@ class VisionEngine:
 
         screen_h, screen_w = screen_img.shape[:2]
         
-        # === 优化步骤 1: 动态范围检查 ===
+        # === 步骤 1: 预处理截图 ===
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
-        min_val, max_val, _, _ = cv2.minMaxLoc(screen_gray)
         
-        # 如果画面最亮和最暗的差值小于 30 (说明画面灰蒙蒙一片，或者纯黑)
-        # 此时强制归一化会把噪点放大成信号，必须跳过
-        if (max_val - min_val) < 30:
-             return ("对比度过低", 0.0) if return_max_val else False
-
-        # === 优化步骤 2: 归一化 + Gamma 压制 ===
-        # 先归一化拉伸
-        screen_norm = cv2.normalize(screen_img, None, 0, 255, cv2.NORM_MINMAX)
-        # 再用 Gamma=1.5 压暗中间调，杀死噪点
-        screen_processed = self.gamma_correction(screen_norm, gamma=1.5)
+        # 使用新的流水线：Gamma -> Threshold -> CLAHE
+        screen_processed = self.preprocess_image(screen_gray)
         
         max_score_found = 0.0
         all_skipped = True 
 
-        for tmpl in template_list:
-            tmpl_h, tmpl_w = tmpl.shape[:2]
+        for tmpl_processed, mask in template_list:
+            tmpl_h, tmpl_w = tmpl_processed.shape[:2]
             
             if screen_h < tmpl_h or screen_w < tmpl_w:
                 continue 
             all_skipped = False 
 
-            # 准备模板
-            mask = None
-            if tmpl.shape[2] == 4:
-                tmpl_bgr = cv2.cvtColor(tmpl, cv2.COLOR_BGRA2BGR)
-                mask = tmpl[:, :, 3]
-            else:
-                tmpl_bgr = tmpl
-            
-            # 模板也做同样的处理：归一化 + Gamma
-            tmpl_norm = cv2.normalize(tmpl_bgr, None, 0, 255, cv2.NORM_MINMAX)
-            tmpl_processed = self.gamma_correction(tmpl_norm, gamma=1.5)
-
             try:
+                # === 步骤 2: 匹配 ===
+                # 使用 TM_CCOEFF_NORMED
                 if mask is not None:
                     res = cv2.matchTemplate(screen_processed, tmpl_processed, cv2.TM_CCOEFF_NORMED, mask=mask)
                 else:
