@@ -17,6 +17,11 @@ class VisionEngine:
         if not os.path.exists(self.debug_dir):
             os.makedirs(self.debug_dir)
             
+        # 初始化 CLAHE (对比度限制自适应直方图均衡化)
+        # clipLimit: 对比度限制阈值，越高对比度越强，但也越容易放大噪点
+        # tileGridSize: 局部处理的网格大小
+        self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            
         self.load_templates()
 
     def load_templates(self):
@@ -51,9 +56,21 @@ class VisionEngine:
                 try:
                     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                     if img is not None:
-                        if img.shape[2] == 3:
-                            img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
-                        templates.append(img)
+                        # 统一处理：加载后立刻转为灰度图并应用 CLAHE
+                        # 这样模板和截图的处理逻辑完全一致
+                        if img.shape[2] == 4:
+                            # 分离 Alpha 作为 Mask
+                            b, g, r, a = cv2.split(img)
+                            gray = cv2.cvtColor(cv2.merge([b,g,r]), cv2.COLOR_BGR2GRAY)
+                            # 对模板灰度图也做 CLAHE，保证特征一致
+                            gray = self.clahe.apply(gray)
+                            # 重新组合：灰度图 + 原始Mask
+                            templates.append((gray, a))
+                        else:
+                            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                            gray = self.clahe.apply(gray)
+                            # 没有Mask，用None
+                            templates.append((gray, None))
                 except:
                     pass
         return templates
@@ -83,7 +100,7 @@ class VisionEngine:
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
         """
-        修正版：增加防 Inf/Nan 检查的归一化匹配
+        稳定性优化版：使用 CLAHE 增强 + 灰度匹配
         """
         if screen_img is None:
             err = self.last_error if self.last_error else "未获取到截图"
@@ -94,53 +111,37 @@ class VisionEngine:
 
         screen_h, screen_w = screen_img.shape[:2]
         
-        # === 防御性检查 1: 截图是否纯色 ===
-        # 计算标准差，如果标准差为0，说明是纯色图，没有信息量，归一化会除以零
-        mean, std_dev = cv2.meanStdDev(screen_img)
-        if np.sum(std_dev) < 1.0: # 几乎是纯色
-             return ("区域无内容(纯色)", 0.0) if return_max_val else False
-
-        # === 归一化截图 ===
-        try:
-            screen_norm = cv2.normalize(screen_img, None, 0, 255, cv2.NORM_MINMAX)
-        except:
-            return ("归一化失败", 0.0) if return_max_val else False
+        # === 步骤 1: 预处理截图 ===
+        # 转灰度
+        screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
+        
+        # 应用 CLAHE 增强
+        # 这会平衡光照，让暗处的图标变清晰，同时抑制亮处过曝
+        # 最重要的是，它是局部的，不会因为屏幕边缘的一个亮点而导致整体数值漂移
+        screen_enhanced = self.clahe.apply(screen_gray)
         
         max_score_found = 0.0
         all_skipped = True 
 
-        for tmpl in template_list:
-            tmpl_h, tmpl_w = tmpl.shape[:2]
+        # 注意：现在的 template_list 里存的是元组 (gray_image, mask)
+        for tmpl_gray, mask in template_list:
+            tmpl_h, tmpl_w = tmpl_gray.shape[:2]
             
             if screen_h < tmpl_h or screen_w < tmpl_w:
                 continue 
             all_skipped = False 
 
-            # 准备数据
-            mask = None
-            if tmpl.shape[2] == 4:
-                tmpl_bgr = cv2.cvtColor(tmpl, cv2.COLOR_BGRA2BGR)
-                mask = tmpl[:, :, 3]
-            else:
-                tmpl_bgr = tmpl
-            
-            # === 防御性检查 2: 模板是否纯色 ===
-            mean_t, std_dev_t = cv2.meanStdDev(tmpl_bgr)
-            if np.sum(std_dev_t) < 1.0:
-                continue # 跳过无效模板
-
-            # === 归一化模板 ===
-            tmpl_norm = cv2.normalize(tmpl_bgr, None, 0, 255, cv2.NORM_MINMAX)
-
             try:
+                # === 步骤 2: 匹配 ===
+                # 使用 TM_CCOEFF_NORMED，配合 CLAHE 增强后的图像
                 if mask is not None:
-                    res = cv2.matchTemplate(screen_norm, tmpl_norm, cv2.TM_CCOEFF_NORMED, mask=mask)
+                    res = cv2.matchTemplate(screen_enhanced, tmpl_gray, cv2.TM_CCOEFF_NORMED, mask=mask)
                 else:
-                    res = cv2.matchTemplate(screen_norm, tmpl_norm, cv2.TM_CCOEFF_NORMED)
+                    res = cv2.matchTemplate(screen_enhanced, tmpl_gray, cv2.TM_CCOEFF_NORMED)
                 
                 _, max_val, _, _ = cv2.minMaxLoc(res)
                 
-                # === 防御性检查 3: 检查结果是否为 Inf 或 Nan ===
+                # 过滤无效值
                 if np.isinf(max_val) or np.isnan(max_val):
                     max_val = 0.0
                 
