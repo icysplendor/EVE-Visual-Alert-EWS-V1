@@ -1,6 +1,7 @@
 import sys
 import os
 import ctypes
+from ctypes import wintypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QGroupBox, QDoubleSpinBox, QLineEdit, QTextEdit, QDialog, QFrame)
@@ -15,14 +16,37 @@ from ui.selector import RegionSelector
 from core.audio_logic import AlarmWorker
 from core.i18n import Translator
 
-# === Hi-DPI Fix ===
-try:
-    ctypes.windll.shcore.SetProcessDpiAwareness(1) 
-except:
-    try:
-        ctypes.windll.user32.SetProcessDPIAware()
-    except:
-        pass
+# =============================================================================
+# === 增强版 Hi-DPI 修复 (支持多显示器不同缩放) ===
+# =============================================================================
+def apply_dpi_fix():
+    """
+    强制开启 Windows Per-Monitor DPI Awareness V2。
+    这确保 Qt 获取的坐标是物理像素坐标，与 MSS 截图库一致。
+    """
+    if os.name == 'nt':
+        try:
+            # 尝试设置 Per-Monitor DPI Awareness V2 (Windows 10 Creators Update+)
+            ctypes.windll.shcore.SetProcessDpiAwareness(2) 
+        except Exception:
+            try:
+                # 回退到 Per-Monitor DPI Awareness (Windows 8.1+)
+                ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            except Exception:
+                try:
+                    # 回退到 System DPI Awareness (Windows Vista+)
+                    ctypes.windll.user32.SetProcessDPIAware()
+                except Exception:
+                    pass
+
+# 在创建 QApplication 之前调用
+apply_dpi_fix()
+
+# 禁止 Qt 自己的缩放策略，确保获取物理坐标
+os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
+os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
+os.environ["QT_SCALE_FACTOR"] = "1"
+# =============================================================================
 
 # === EVE Style CSS ===
 EVE_STYLE = """
@@ -178,13 +202,8 @@ class MainWindow(QMainWindow):
             self.toggle_monitoring()
 
     def load_sounds(self):
-        """
-        加载音频，支持相对路径
-        """
         for key in ["local", "overview", "monster", "mixed"]:
-            # 使用 ConfigManager 的 get_audio_path 获取绝对路径
             path = self.cfg.get_audio_path(key)
-            
             if path and os.path.exists(path):
                 effect = QSoundEffect()
                 effect.setSource(QUrl.fromLocalFile(path))
@@ -240,10 +259,9 @@ class MainWindow(QMainWindow):
         layout_cfg = QVBoxLayout()
         layout_cfg.setSpacing(6)
 
-        # 阈值设置 (三列布局)
+        # 阈值设置
         row_thresh = QHBoxLayout()
         
-        # 本地阈值
         vbox1 = QVBoxLayout()
         self.lbl_th_local = QLabel("Local %")
         self.spin_local = QDoubleSpinBox()
@@ -254,7 +272,6 @@ class MainWindow(QMainWindow):
         vbox1.addWidget(self.lbl_th_local)
         vbox1.addWidget(self.spin_local)
         
-        # 总览阈值
         vbox2 = QVBoxLayout()
         self.lbl_th_over = QLabel("Over %")
         self.spin_over = QDoubleSpinBox()
@@ -265,7 +282,6 @@ class MainWindow(QMainWindow):
         vbox2.addWidget(self.lbl_th_over)
         vbox2.addWidget(self.spin_over)
         
-        # 怪物阈值
         vbox3 = QVBoxLayout()
         self.lbl_th_npc = QLabel("Rats %")
         self.spin_npc = QDoubleSpinBox()
@@ -395,10 +411,8 @@ class MainWindow(QMainWindow):
     def select_audio(self, key, label_widget):
         fname, _ = QFileDialog.getOpenFileName(self, "Audio File", "", "Audio (*.wav *.mp3)")
         if fname:
-            # 获取当前工作目录
             cwd = os.getcwd()
             try:
-                # 尝试保存相对路径
                 rel_path = os.path.relpath(fname, cwd)
                 if rel_path.startswith(".."):
                     save_path = fname
