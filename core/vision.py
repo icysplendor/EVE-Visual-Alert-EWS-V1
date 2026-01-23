@@ -13,13 +13,7 @@ class VisionEngine:
         self.last_screenshot_shape = "无"
         self.last_error = None
         
-        self.debug_dir = os.path.join(os.getcwd(), "debug_scans")
-        if not os.path.exists(self.debug_dir):
-            os.makedirs(self.debug_dir)
-            
-        # 初始化 CLAHE (对比度限制自适应直方图均衡化)
-        # clipLimit: 对比度限制阈值，越高对比度越强，但也越容易放大噪点
-        # tileGridSize: 局部处理的网格大小
+        # 初始化 CLAHE
         self.clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
             
         self.load_templates()
@@ -56,26 +50,24 @@ class VisionEngine:
                 try:
                     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                     if img is not None:
-                        # 统一处理：加载后立刻转为灰度图并应用 CLAHE
-                        # 这样模板和截图的处理逻辑完全一致
                         if img.shape[2] == 4:
-                            # 分离 Alpha 作为 Mask
                             b, g, r, a = cv2.split(img)
                             gray = cv2.cvtColor(cv2.merge([b,g,r]), cv2.COLOR_BGR2GRAY)
-                            # 对模板灰度图也做 CLAHE，保证特征一致
                             gray = self.clahe.apply(gray)
-                            # 重新组合：灰度图 + 原始Mask
                             templates.append((gray, a))
                         else:
                             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                             gray = self.clahe.apply(gray)
-                            # 没有Mask，用None
                             templates.append((gray, None))
                 except:
                     pass
         return templates
 
     def capture_screen(self, region, debug_name=None):
+        """
+        截取屏幕并返回图像数据 (BGR格式)。
+        不再保存到硬盘。
+        """
         self.last_error = None
         if not region: 
             return None
@@ -90,8 +82,8 @@ class VisionEngine:
                 h, w = img_bgr.shape[:2]
                 self.last_screenshot_shape = f"{w}x{h}"
                 
-                if debug_name:
-                    cv2.imwrite(os.path.join(self.debug_dir, f"debug_{debug_name}.png"), img_bgr)
+                # 修改点：这里不再执行 cv2.imwrite
+                # 图像数据直接在内存中返回给调用者(main.py)用于显示
                 return img_bgr
                 
         except Exception as e:
@@ -99,9 +91,6 @@ class VisionEngine:
             return None
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
-        """
-        稳定性优化版：使用 CLAHE 增强 + 灰度匹配
-        """
         if screen_img is None:
             err = self.last_error if self.last_error else "未获取到截图"
             return (err, 0.0) if return_max_val else False
@@ -110,20 +99,12 @@ class VisionEngine:
             return ("无模板", 0.0) if return_max_val else False
 
         screen_h, screen_w = screen_img.shape[:2]
-        
-        # === 步骤 1: 预处理截图 ===
-        # 转灰度
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
-        
-        # 应用 CLAHE 增强
-        # 这会平衡光照，让暗处的图标变清晰，同时抑制亮处过曝
-        # 最重要的是，它是局部的，不会因为屏幕边缘的一个亮点而导致整体数值漂移
         screen_enhanced = self.clahe.apply(screen_gray)
         
         max_score_found = 0.0
         all_skipped = True 
 
-        # 注意：现在的 template_list 里存的是元组 (gray_image, mask)
         for tmpl_gray, mask in template_list:
             tmpl_h, tmpl_w = tmpl_gray.shape[:2]
             
@@ -132,8 +113,6 @@ class VisionEngine:
             all_skipped = False 
 
             try:
-                # === 步骤 2: 匹配 ===
-                # 使用 TM_CCOEFF_NORMED，配合 CLAHE 增强后的图像
                 if mask is not None:
                     res = cv2.matchTemplate(screen_enhanced, tmpl_gray, cv2.TM_CCOEFF_NORMED, mask=mask)
                 else:
@@ -141,7 +120,6 @@ class VisionEngine:
                 
                 _, max_val, _, _ = cv2.minMaxLoc(res)
                 
-                # 过滤无效值
                 if np.isinf(max_val) or np.isnan(max_val):
                     max_val = 0.0
                 
