@@ -49,10 +49,8 @@ class VisionEngine:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
                 try:
-                    # 必须保留 Alpha 通道
                     img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
                     if img is not None:
-                        # 如果没有 Alpha 通道 (比如JPG)，手动加一个全白的 Alpha
                         if img.shape[2] == 3:
                             img = cv2.cvtColor(img, cv2.COLOR_BGR2BGRA)
                         templates.append(img)
@@ -70,8 +68,6 @@ class VisionEngine:
         try:
             with mss.mss() as sct:
                 img = np.array(sct.grab(monitor))
-                # mss 返回 BGRA，这很好，保留它用于后续比对
-                # 但为了兼容之前的逻辑，我们这里返回 BGR，但在匹配时我们会重新处理
                 img_bgr = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
                 
                 h, w = img_bgr.shape[:2]
@@ -87,8 +83,11 @@ class VisionEngine:
 
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
         """
-        重写的匹配逻辑：基于掩码的平方差匹配 (Masked SQDIFF)
-        这种方式对颜色极其敏感，且完美支持透明度忽略。
+        三层复合匹配逻辑：
+        1. 颜色层 (SQDIFF): 针对精准颜色匹配 (如完全一致的红名)
+        2. 灰度层 (Grayscale): 针对有色图标但背景微变 (如暗红色、灰色图标)
+        3. 高光层 (Binary): 针对亮背景下的纯白符号
+        取三者最大值。
         """
         if screen_img is None:
             err = self.last_error if self.last_error else "未获取到截图"
@@ -97,9 +96,15 @@ class VisionEngine:
         if not template_list:
             return ("无模板", 0.0) if return_max_val else False
 
-        # 将屏幕截图保持 BGR 格式 (OpenCV默认)
-        # 之前的逻辑是转灰度，现在我们用彩色匹配来提高准确度
         screen_h, screen_w = screen_img.shape[:2]
+        
+        # --- 预处理屏幕图像 ---
+        # 1. 灰度图 (用于层级 B)
+        screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
+        
+        # 2. 二值化图 (用于层级 C)
+        # 阈值 190: 过滤掉大部分背景，只留高亮符号
+        _, screen_binary = cv2.threshold(screen_gray, 190, 255, cv2.THRESH_BINARY)
         
         max_score_found = 0.0
         all_skipped = True 
@@ -107,65 +112,66 @@ class VisionEngine:
         for tmpl in template_list:
             tmpl_h, tmpl_w = tmpl.shape[:2]
             
-            # 尺寸检查
             if screen_h < tmpl_h or screen_w < tmpl_w:
                 continue 
             all_skipped = False 
 
-            # 分离模板的 BGR 和 Alpha
+            # 准备模板数据
             if tmpl.shape[2] == 4:
                 tmpl_bgr = tmpl[:, :, :3]
                 mask = tmpl[:, :, 3]
+                tmpl_gray_raw = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
             else:
                 tmpl_bgr = tmpl
                 mask = np.ones((tmpl_h, tmpl_w), dtype=np.uint8) * 255
+                tmpl_gray_raw = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
 
+            # --- 层级 A: 颜色匹配 (SQDIFF) ---
+            # 优势: 极低误报率，精准匹配颜色
+            score_a = 0.0
             try:
-                # === 核心算法变更 ===
-                # 使用 TM_SQDIFF (平方差匹配)
-                # 这种算法计算的是：(T - I)^2
-                # 结果越小越好 (0表示完全一样)
-                # 支持 mask：mask为0的地方不参与计算
-                
-                res = cv2.matchTemplate(screen_img, tmpl_bgr, cv2.TM_SQDIFF, mask=mask)
-                
-                # 找到最小差异值 (min_val)
-                min_val, _, _, _ = cv2.minMaxLoc(res)
-                
-                # === 将差异值转换为相似度分数 (0.0 - 1.0) ===
-                # SQDIFF 的结果是像素差的平方和。
-                # 我们需要归一化它。
-                # 1. 计算掩码内的有效像素数
+                res_a = cv2.matchTemplate(screen_img, tmpl_bgr, cv2.TM_SQDIFF, mask=mask)
+                min_val, _, _, _ = cv2.minMaxLoc(res_a)
                 valid_pixels = cv2.countNonZero(mask)
-                if valid_pixels == 0: continue
-                
-                # 2. 计算平均每个像素的差异
-                # min_val 是总平方差
-                avg_diff_per_pixel = min_val / valid_pixels
-                
-                # 3. 转换为 0-1 分数
-                # 假设最大允许的平均差异是 10000 (大概相当于每个颜色通道差60左右)
-                # 这是一个经验值，可以调整。差异越小，score 越接近 1
-                # 这种转换是非线性的，对精准匹配非常敏感
-                
-                # 稍微放宽一点分母，防止分数太低
-                score = 1.0 / (1.0 + avg_diff_per_pixel / 1000.0)
-                
-                # 修正逻辑：如果差异极小，score 会接近 1.0
-                # 如果差异很大，score 会迅速掉到 0.1 以下
-                
-                if score > max_score_found:
-                    max_score_found = score
+                if valid_pixels > 0:
+                    avg_diff = min_val / valid_pixels
+                    # 转换分数的公式，对色差敏感
+                    score_a = 1.0 / (1.0 + avg_diff / 1500.0)
+            except: pass
 
-            except Exception as e:
-                # print(f"Match error: {e}")
-                continue
+            # --- 层级 B: 灰度形状匹配 (CCOEFF_NORMED) ---
+            # 优势: 忽略色相，只看明暗轮廓。能识别暗红色、深灰色图标
+            score_b = 0.0
+            try:
+                # 这种模式下，我们直接用灰度匹配，不二值化
+                # 这样保留了“暗红”和“黑色”的区别 (灰度值不同)
+                res_b = cv2.matchTemplate(screen_gray, tmpl_gray_raw, cv2.TM_CCOEFF_NORMED, mask=mask)
+                _, max_val_b, _, _ = cv2.minMaxLoc(res_b)
+                score_b = max_val_b
+            except: pass
+
+            # --- 层级 C: 高光二值化匹配 (Binary) ---
+            # 优势: 忽略背景干扰，只看最亮的符号。解决“白符号+亮背景”问题
+            score_c = 0.0
+            try:
+                # 模板也二值化
+                _, tmpl_binary = cv2.threshold(tmpl_gray_raw, 190, 255, cv2.THRESH_BINARY)
+                # 只有当模板里确实有高亮内容时才启用此模式
+                if cv2.countNonZero(tmpl_binary) > 5:
+                    res_c = cv2.matchTemplate(screen_binary, tmpl_binary, cv2.TM_CCOEFF_NORMED)
+                    _, max_val_c, _, _ = cv2.minMaxLoc(res_c)
+                    score_c = max_val_c
+            except: pass
+
+            # 取三者最大值作为最终得分
+            final_score = max(score_a, score_b, score_c)
+
+            if final_score > max_score_found:
+                max_score_found = final_score
 
         if all_skipped:
             return ("尺寸错误", 0.0) if return_max_val else False
 
-        # 由于 SQDIFF 转换的分数通常比较苛刻
-        # 0.95 的阈值可能太高了，建议用户在 UI 上调整到 0.8 左右开始测试
         if return_max_val:
             return (None, max_score_found)
         else:
