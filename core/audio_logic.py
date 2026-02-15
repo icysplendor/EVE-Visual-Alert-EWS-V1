@@ -37,6 +37,7 @@ class AlarmWorker(QObject):
                 report = (
                     f"--- 系统自检报告 ---\n"
                     f"{self.vision.template_status_msg}\n"
+                    f"颜色过滤: 已启用 (阈值 > {self.vision.GREEN_PIXEL_THRESHOLD}px)\n"
                     f"--------------------"
                 )
                 self.log_signal.emit(report)
@@ -54,20 +55,33 @@ class AlarmWorker(QObject):
             img_overview = self.vision.capture_screen(regions.get("overview"), "overview")
             img_monster = self.vision.capture_screen(regions.get("monster"), "monster")
 
-            def process_match(img, templates, thresh):
-                err_msg, score = self.vision.match_templates(img, templates, thresh, True)
+            # 辅助函数：处理匹配并传递颜色检查标志
+            def process_match(img, templates, thresh, check_green=False):
+                # 调用 vision 的 match_templates，传入 check_green_exclusion 参数
+                err_msg, score = self.vision.match_templates(
+                    img, templates, thresh, 
+                    return_max_val=True, 
+                    check_green_exclusion=check_green
+                )
                 is_hit = score >= thresh
                 return is_hit, score, err_msg
 
-            # === 修改点：使用各自独立的图标库 ===
-            # Local 截图 -> 匹配 local_templates
-            is_local, score_local, err_local = process_match(img_local, self.vision.local_templates, t_local)
+            # === 修改点：Local 和 Overview 开启绿色检查，Monster 关闭 ===
             
-            # Overview 截图 -> 匹配 overview_templates
-            is_overview, score_overview, err_overview = process_match(img_overview, self.vision.overview_templates, t_overview)
+            # Local 截图 -> 匹配 local_templates (开启反向绿色检查)
+            is_local, score_local, err_local = process_match(
+                img_local, self.vision.local_templates, t_local, check_green=True
+            )
             
-            # Monster 截图 -> 匹配 monster_templates
-            is_monster, score_monster, err_monster = process_match(img_monster, self.vision.monster_templates, t_monster)
+            # Overview 截图 -> 匹配 overview_templates (开启反向绿色检查)
+            is_overview, score_overview, err_overview = process_match(
+                img_overview, self.vision.overview_templates, t_overview, check_green=True
+            )
+            
+            # Monster 截图 -> 匹配 monster_templates (关闭颜色检查，只要形状对就行)
+            is_monster, score_monster, err_monster = process_match(
+                img_monster, self.vision.monster_templates, t_monster, check_green=False
+            )
 
             self.status["local"] = is_local
             self.status["overview"] = is_overview
