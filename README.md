@@ -1,107 +1,117 @@
-# EVE Visual Alert (EWS)
+# EVE Visual Alert (EWS) - 用户使用手册
 
-![AI Generated](https://img.shields.io/badge/Code-AI%20Generated-f39f37) ![Python](https://img.shields.io/badge/Python-3.10+-3776ab) ![EVE Online](https://img.shields.io/badge/Game-EVE%20Online-cyan)
-
-**EVE Visual Alert** represents a completely automated threat detection tool designed for EVE Online. It utilizes computer vision (OpenCV) to monitor specific screen regions for hostile indicators and provides audio/webhook alerts based on specific logic priorities.
-
-**EVE Visual Alert** 是一个专为 EVE Online 设计的自动化威胁检测工具。利用计算机视觉（OpenCV）监控屏幕特定区域的敌对信号，并根据特定的逻辑优先级提供音频和 Webhook 警报。
+**EVE Visual Alert** 是一款基于计算机视觉（OpenCV）的 EVE Online 外部辅助工具。它通过监控屏幕特定区域的像素变化，利用模板匹配技术识别敌对信号、怪物刷新及探针扫描结果，并提供多维度的音频报警。
 
 ---
 
-## 🤖 A Note on AI Generation / 关于 AI 生成的说明
+## 🛑 核心前置要求 (必读)
 
-> **This project is 100% AI-generated.**
->
-> Every line of code in this repository—from the PyQT6 graphical interface, the multi-threaded visual logic, to the configuration management—was written by an **AI Coding Agent** through a continuous conversational prompt session. No manual coding was performed by a human developer. This project serves as a demonstration of LLM capabilities in complex software engineering.
+在启动软件前，请务必确保游戏设置符合以下要求，否则软件将**无法正常工作**：
 
-> **这个项目是 100% 由 AI 生成的。**
->
-> 本仓库中的每一行代码——从 PyQT6 图形界面、多线程视觉逻辑，到配置管理系统——均由 **AI 编程智能体** 通过连续的对话指令生成。没有人类开发者手动编写任何代码。本项目旨在展示大语言模型（LLM）在复杂软件工程中的能力。
+1.  **界面缩放比必须为 100%**
+    *   请在 EVE 游戏设置 -> 显示设置 -> UI 缩放 (UI Scaling) 中设置为 **100%**。
+    *   *原因：计算机视觉是基于像素点比对的，缩放会导致图标像素模糊或变形，导致识别失败。*
 
----
-## 请注意，本程序现在仅在游戏缩放率为100%的情况下才可以使用！
-## Please note that this program can only be used when the game scaling is 100%!
-
-## ✨ Features / 功能特性
-
-*   **Non-Intrusive Monitoring**: Uses screen capture analysis only. Does not read game memory or inject code. Safe and compliant with TOS (Screen Reader category).
-    *   **非入侵式监控**：仅使用屏幕截图分析。不读取游戏内存，不注入代码。符合 TOS 安全标准（屏幕阅读器类别）。
-*   **Sci-Fi UI**: A dark, compact, EVE-inspired interface utilizing PyQt6.
-    *   **科幻 UI**：基于 PyQt6 构建的深色、紧凑、EVE 风格的界面。
-*   **Logic-Based Audio Engine**:
-    *   Determines threat priority (Overview > Local).
-    *   Supports "Mixed Threat" alerts (e.g., detected rats AND hostiles simultaneously).
-    *   **逻辑音频引擎**：智能判断威胁优先级（总览 > 本地），支持“混合威胁”警报（如同时检测到刷怪和敌对）。
-*   **Template Matching**: Supports transparent PNGs for precise icon matching regardless of background nebula changes.
-    *   **模板匹配**：支持带透明通道的 PNG 图片，无论背景星云如何变化都能精准识别图标。
-*   **Webhook Support**: Can send JSON payloads to external services (like Discord) when alarms trigger.
-    *   **Webhook 支持**：报警触发时可向外部服务（如 Discord）发送通知。
-*   **Bilingual**: Instant switching between English and Chinese.
-    *   **双语支持**：一键切换中文和英文界面。
-
-## 🛠️ Installation / 安装
-
-### Prerequisites / 前置要求
-*   Windows 10/11 (High DPI supported)
-*   Python 3.10+
-
-### Setup / 配置步骤
-
-1.  **Clone or Download** the repository.
-    下载本仓库。
-2.  **Install Dependencies**:
-    安装依赖库：
-    ```bash
-    pip install -r requirements.txt
-    ```
-3.  **Run the Software**:
-    运行软件：
-    ```bash
-    python main.py
-    ```
+2.  **禁用窗口浅色背景 (强烈推荐)**
+    *   请在游戏内聊天窗口、总览窗口的设置中，**取消勾选**“开启浅色背景”或将透明度调低。
+    *   *原因：星云背景的变化会干扰图像识别，纯深色背景能大幅提高识别准确率。*
 
 ---
 
-## 📁 Usage Guide / 使用指南
+## ✨ 功能概览
 
-### 1. Asset Preparation / 素材准备
-The software requires you to provide template images to check against.
-软件需要您提供用于比对的模板图片。
+本软件提供以下 5 大核心侦测功能：
 
-*   Go to the `assets` folder.
-    进入 `assets` 文件夹。
-*   **`assets/hostile_icons`**: Place images of hostile indicators (e.g., Red/Neutral symbols in Local/Overview).
-    放入敌对指示图标（例如本地/总览中的红/白名图标）。
-*   **`assets/monster_icons`**: Place images of ratting indicators (e.g., NPC names or icons).
-    放入刷怪指示图标（例如 NPC 名字或图标）。
-
-> **Tip**: Use small, cropped **PNG images with transparent backgrounds** for best results. Do not use full screenshots as templates.
-> **提示**：请使用裁剪好的、带有**透明背景的小尺寸 PNG 图片**以获得最佳效果。切勿将整个屏幕截图作为模板。
-
-### 2. Operation / 操作流程
-1.  **Set Regions**: Click the buttons (Local/Overview/Rats) and draw a box over the corresponding area on your screen.
-    **设定区域**：点击按钮（本地/总览/怪物），在屏幕对应位置画框。
-2.  **Load Audio**: Select `.wav` or `.mp3` files for each alarm type.
-    **加载音频**：为每种警报类型选择音频文件。
-3.  **Threshold**: Adjust the similarity threshold (Recommended: 0.85).
-    **阈值**：调整相似度阈值（推荐 0.85）。
-4.  **ENGAGE**: Click to start monitoring.
-    **启动**：点击“启动监控”。
+1.  **本地 (Local) 敌对预警**：监控本地聊天栏成员列表，识别非友军（非绿/蓝）的敌对图标。
+2.  **总览 (Overview) 敌对预警**：监控总览列表，识别出现在视距内的敌对舰船。
+3.  **刷怪 (Rats) 状态监控**：监控总览中的 NPC 怪物，用于判定当前是否正在刷怪（配合混合警报逻辑）。
+4.  **探针 (Probe) 扫描预警**：监控定向扫描（D-Scan）结果窗口，当您按 `V` 键扫描出作战探针时发出独立警报。
+5.  **防呆/待机提醒**：当软件已打开但**未点击“启动监控”**时，每 2 分钟发出一次提示音，防止您忘记开启防御系统。
 
 ---
 
-## ⚠️ Disclaimer / 免责声明
+## 🛠️ 详细使用指南
 
-**EVE Online Terms of Service Notice:**
-This software functions as a screen reader and overlay. It **does not** automate inputs (keyboard/mouse simulation) and **does not** read game memory. While screen readers are generally considered "Grey Area" or allowable (similar to Discord Overlay or OBS), CCP Games has the final say.
+### 1. 素材准备 (Assets)
+软件通过比对图片来识别威胁。请确保根目录下的 `assets` 文件夹内包含正确的图标模板（`.png` 格式，推荐透明背景）：
+*   `assets/hostile_icons_local`: 放入本地栏的敌对图标（如红星、白名、橙色骷髅等）。
+*   `assets/hostile_icons_overview`: 放入总览栏的敌对舰船图标。
+*   `assets/monster_icons`: 放入 NPC 怪物的图标或名字截图。
+*   `assets/probe_icons`: 放入定向扫描窗口中“作战探针”的名字截图或图标。
 
-**Use at your own risk. The author (and the AI) accepts no responsibility for bans or losses.**
+### 2. 监控区域设定 (Sectors)
+启动软件后，请依次点击以下按钮进行区域框选：
 
-**EVE Online 服务条款说明：**
-本软件仅作为屏幕阅读器和覆盖层运行。它**不包含**任何输入自动化（模拟鼠标键盘），也**不读取**游戏内存。虽然屏幕阅读器通常被视为“灰色地带”或允许的辅助工具（类似于 Discord 覆盖或 OBS），但 CCP Games 拥有最终解释权。
+*   **Local (本地栏)**:
+    *   点击按钮，框选本地聊天窗口中**显示人物图标**的那一列。
+    *   *(此处请插入本地栏框选示例图片)*
+*   **Overview (总览栏)**:
+    *   点击按钮，框选总览窗口中**显示舰船图标**的那一列。
+    *   *(此处请插入总览栏框选示例图片)*
+*   **Rats (怪物栏)**:
+    *   通常框选总览中显示 NPC **名字或图标**的区域。
+*   **Probe (探针扫描)**:
+    *   打开定向扫描窗口，点击按钮，框选扫描结果列表中**显示物体名字**的区域。
+    *   **注意**：此功能需要您在游戏中手动按 `V` 键刷新扫描结果，软件负责识别结果中是否包含作战探针。
+    *   *(此处请插入定向扫描框选示例图片)*
 
-**请自行承担使用风险。作者（以及 AI）不对账号封禁或资产损失承担任何责任。**
+### 3. 阈值与音频设置 (Settings)
+*   **阈值 (Thresholds)**: 建议默认 **0.95**。如果发现漏报，可尝试降至 0.85；如果误报，请调高。
+*   **音频选择**: 点击 `...` 按钮为每个功能选择 `.wav` 或 `.mp3` 警报音。
+
+### 4. 启动与停止
+*   点击 **ENGAGE (启动监控)** 开始运行。
+*   点击 **VIEW (实时画面)** 可查看机器视觉当前“看到”的图像，用于调试框选区域是否正确。
 
 ---
 
-<p align="center">Generated with ❤️ by Intelligence</p>
+## 📊 实时日志说明
+
+软件底部的日志窗口会实时显示当前的检测状态。格式如下：
+
+`[14:30:05] ✅ 安全 [L:0(0.00) | O:0(0.00) | M:1(0.98) | P:0(0.00)]`
+
+**参数详解：**
+*   **L (Local)**: 本地威胁状态。`0`=无，`1`=有。括号内为相似度分数（0.00-1.00）。
+*   **O (Overview)**: 总览威胁状态。
+*   **M (Monster)**: 怪物状态。
+*   **P (Probe)**: 探针状态。
+
+**特殊逻辑说明：**
+*   **智能友军过滤**：在 Local 和 Overview 模式下，如果识别到的图标区域包含大量**绿色像素**（判定为舰队/同盟成员），软件会自动忽略该威胁，日志中不会触发报警。
+
+---
+
+## 🔊 警报声音模式说明
+
+本软件采用 **优先级逻辑** + **独立通道** 的混合音频系统：
+
+### A. 主威胁警报 (互斥播放，有优先级)
+以下三种情况同时发生时，**只播放优先级最高**的一种声音，避免声音嘈杂：
+
+1.  **混合警报 (Mixed Threat)** - **[优先级最高]**
+    *   **触发条件**：同时检测到 **怪物 (M)** 和 **本地/总览威胁 (L/O)**。
+    *   **场景**：您正在刷怪，且敌对进场。这是最危险的情况，需要立即停手。
+2.  **总览警报 (Overview)** - **[优先级中]**
+    *   **触发条件**：检测到总览有敌对，但没有检测到怪物。
+    *   **场景**：敌对出现在格子上（可能在赶路或隐身解除）。
+3.  **本地警报 (Local)** - **[优先级低]**
+    *   **触发条件**：仅本地有敌对，总览无敌对。
+    *   **场景**：敌对进入星系，但尚未出现在您的视野内。
+
+### B. 探针警报 (独立通道，可叠加)
+*   **探针 (Probe)**
+    *   **触发条件**：定向扫描结果中发现作战探针模板。
+    *   **声音逻辑**：**独立播放**。这意味着如果主威胁警报正在响，探针警报会**叠加**在上面同时响起。
+    *   **作用**：让您在刷怪时只需按 V，无需盯着扫描窗口，听到特定音效即代表被扫描。
+
+### C. 防呆/待机提醒 (Idle Alert)
+*   **待机 (Idle)**
+    *   **触发条件**：软件已打开，但处于 **STOP (停止)** 状态超过 2 分钟。
+    *   **作用**：防止您上线后打开了软件，却忘记点击“启动监控”，导致“裸奔”被抓。
+
+---
+
+## ⚠️ 免责声明
+
+本软件仅作为屏幕阅读辅助工具，不包含任何内存读取或自动化输入操作。但在使用任何第三方工具时，请务必遵守 EVE Online 的服务条款 (EULA/TOS)。使用者需自行承担所有风险。
