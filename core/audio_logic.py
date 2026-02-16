@@ -5,8 +5,8 @@ from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal
 
 class AlarmWorker(QObject):
-    log_signal = pyqtSignal(str)     # 主日志和主警报信号
-    probe_signal = pyqtSignal(bool)  # 独立的探针警报信号
+    log_signal = pyqtSignal(str)     
+    probe_signal = pyqtSignal(bool)  
 
     def __init__(self, config_manager, vision_engine):
         super().__init__()
@@ -14,7 +14,6 @@ class AlarmWorker(QObject):
         self.vision = vision_engine
         self.running = False
         self.thread = None
-        self.status = {"local": False, "overview": False, "monster": False, "probe": False}
         self.first_run = True 
 
     def start(self):
@@ -38,90 +37,94 @@ class AlarmWorker(QObject):
                 report = (
                     f"--- 系统自检报告 ---\n"
                     f"{self.vision.template_status_msg}\n"
-                    f"颜色过滤: 已启用 (阈值 > {self.vision.GREEN_PIXEL_THRESHOLD}px)\n"
+                    f"颜色过滤: 已启用\n"
                     f"--------------------"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
                 time.sleep(1)
 
-            regions = self.cfg.get("regions")
+            groups = self.cfg.get("groups")
             thresholds = self.cfg.get("thresholds")
             
-            # 截图
-            img_local = self.vision.capture_screen(regions.get("local"), "local")
-            img_overview = self.vision.capture_screen(regions.get("overview"), "overview")
-            img_monster = self.vision.capture_screen(regions.get("monster"), "monster")
-            img_probe = self.vision.capture_screen(regions.get("probe"), "probe")
-
-            # 辅助函数
-            def process_match(img, templates, thresh, check_green=False):
-                err_msg, score = self.vision.match_templates(
-                    img, templates, thresh, 
-                    return_max_val=True, 
-                    check_green_exclusion=check_green
-                )
-                is_hit = score >= thresh
-                return is_hit, score, err_msg
-
-            # 1. 主威胁检测
-            is_local, score_local, err_local = process_match(
-                img_local, self.vision.local_templates, thresholds.get("local", 0.95), check_green=True
-            )
-            is_overview, score_overview, err_overview = process_match(
-                img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), check_green=True
-            )
-            is_monster, score_monster, err_monster = process_match(
-                img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), check_green=False
-            )
+            # 全局状态标志
+            global_threat = False
+            global_probe = False
+            global_sound = None
             
-            # 2. 探针检测 (独立逻辑，类似 Monster 不查颜色)
-            is_probe, score_probe, err_probe = process_match(
-                img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), check_green=False
-            )
+            log_details = []
 
-            self.status["local"] = is_local
-            self.status["overview"] = is_overview
-            self.status["monster"] = is_monster
-            self.status["probe"] = is_probe
+            # 遍历每一个监控组
+            for idx, group in enumerate(groups):
+                regions = group.get("regions", {})
+                grp_name = group.get("name", f"Grp {idx+1}")
+                
+                # 截图
+                img_local = self.vision.capture_screen(regions.get("local"))
+                img_overview = self.vision.capture_screen(regions.get("overview"))
+                img_monster = self.vision.capture_screen(regions.get("monster"))
+                img_probe = self.vision.capture_screen(regions.get("probe"))
 
-            # === 探针独立信号 ===
-            if is_probe:
+                # 辅助函数
+                def process_match(img, templates, thresh, check_green=False):
+                    err_msg, score = self.vision.match_templates(
+                        img, templates, thresh, 
+                        return_max_val=True, 
+                        check_green_exclusion=check_green
+                    )
+                    is_hit = score >= thresh
+                    return is_hit, score, err_msg
+
+                # 检测
+                is_local, s_loc, _ = process_match(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
+                is_over, s_ovr, _ = process_match(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
+                is_mon, s_mon, _ = process_match(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
+                is_prb, s_prb, _ = process_match(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
+
+                # 状态聚合
+                has_threat = is_local or is_over
+                if has_threat: global_threat = True
+                if is_prb: global_probe = True
+
+                # 确定当前组的最高优先级声音
+                current_sound = None
+                if has_threat and is_mon: current_sound = "mixed"
+                elif is_over: current_sound = "overview"
+                elif is_local: current_sound = "local"
+                elif is_mon: current_sound = "monster"
+
+                # 提升全局声音优先级 (Mixed > Overview > Local > Monster)
+                priority_map = {"mixed": 4, "overview": 3, "local": 2, "monster": 1, None: 0}
+                if priority_map.get(current_sound, 0) > priority_map.get(global_sound, 0):
+                    global_sound = current_sound
+
+                # 记录简报 (仅记录有状态的组，或者如果都没有状态，记录第一个组)
+                if has_threat or is_mon or is_prb:
+                    log_details.append(f"{grp_name}:[L:{int(is_local)} O:{int(is_over)} M:{int(is_mon)} P:{int(is_prb)}]")
+
+            # === 信号发射 ===
+            if global_probe:
                 self.probe_signal.emit(True)
 
-            # === 主报警逻辑 ===
-            has_threat = is_local or is_overview
-            sound_to_play = None
-            if has_threat and is_monster: sound_to_play = "mixed"
-            elif is_overview: sound_to_play = "overview"
-            elif is_local: sound_to_play = "local"
-            elif is_monster: sound_to_play = "monster"
-
-            def fmt(score, err):
-                if err: return f"❌{err}"
-                return f"{score:.2f}"
-
-            status_desc = (f"[L:{int(is_local)}({fmt(score_local, err_local)}) | "
-                           f"O:{int(is_overview)}({fmt(score_overview, err_overview)}) | "
-                           f"M:{int(is_monster)}({fmt(score_monster, err_monster)}) | "
-                           f"P:{int(is_probe)}({fmt(score_probe, err_probe)})]")
-            
-            if sound_to_play:
-                log_msg = f"[{now_str}] ⚠️ 触发: {sound_to_play.upper()} {status_desc}"
+            if global_sound:
+                detail_str = " | ".join(log_details)
+                log_msg = f"[{now_str}] ⚠️ 触发: {global_sound.upper()} >> {detail_str}"
                 self.log_signal.emit(log_msg)
                 
                 webhook = self.cfg.get("webhook_url")
                 if webhook:
                     try:
-                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':sound_to_play}}).start()
+                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':global_sound}}).start()
                     except: pass
                 time.sleep(2.0)
-            elif is_probe:
-                # 只有探针触发，主报警没有触发时，也打一条日志
-                log_msg = f"[{now_str}] ⚠️ 探针: PROBE {status_desc}"
+            elif global_probe:
+                # 仅探针
+                detail_str = " | ".join(log_details)
+                log_msg = f"[{now_str}] ⚠️ 探针: PROBE >> {detail_str}"
                 self.log_signal.emit(log_msg)
                 time.sleep(2.0)
             else:
-                log_msg = f"[{now_str}] ✅ 安全 {status_desc}"
+                # 安全 (降低日志频率，或者只打印 Safe)
+                log_msg = f"[{now_str}] ✅ 安全"
                 self.log_signal.emit(log_msg)
                 time.sleep(0.5)
