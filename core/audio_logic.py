@@ -5,7 +5,8 @@ from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal
 
 class AlarmWorker(QObject):
-    log_signal = pyqtSignal(str)
+    log_signal = pyqtSignal(str)     # 主日志和主警报信号
+    probe_signal = pyqtSignal(bool)  # 独立的探针警报信号
 
     def __init__(self, config_manager, vision_engine):
         super().__init__()
@@ -13,7 +14,7 @@ class AlarmWorker(QObject):
         self.vision = vision_engine
         self.running = False
         self.thread = None
-        self.status = {"local": False, "overview": False, "monster": False}
+        self.status = {"local": False, "overview": False, "monster": False, "probe": False}
         self.first_run = True 
 
     def start(self):
@@ -46,18 +47,15 @@ class AlarmWorker(QObject):
 
             regions = self.cfg.get("regions")
             thresholds = self.cfg.get("thresholds")
-            t_local = thresholds.get("local", 0.95)
-            t_overview = thresholds.get("overview", 0.95)
-            t_monster = thresholds.get("monster", 0.95)
-
+            
             # 截图
             img_local = self.vision.capture_screen(regions.get("local"), "local")
             img_overview = self.vision.capture_screen(regions.get("overview"), "overview")
             img_monster = self.vision.capture_screen(regions.get("monster"), "monster")
+            img_probe = self.vision.capture_screen(regions.get("probe"), "probe")
 
-            # 辅助函数：处理匹配并传递颜色检查标志
+            # 辅助函数
             def process_match(img, templates, thresh, check_green=False):
-                # 调用 vision 的 match_templates，传入 check_green_exclusion 参数
                 err_msg, score = self.vision.match_templates(
                     img, templates, thresh, 
                     return_max_val=True, 
@@ -66,28 +64,32 @@ class AlarmWorker(QObject):
                 is_hit = score >= thresh
                 return is_hit, score, err_msg
 
-            # === 修改点：Local 和 Overview 开启绿色检查，Monster 关闭 ===
-            
-            # Local 截图 -> 匹配 local_templates (开启反向绿色检查)
+            # 1. 主威胁检测
             is_local, score_local, err_local = process_match(
-                img_local, self.vision.local_templates, t_local, check_green=True
+                img_local, self.vision.local_templates, thresholds.get("local", 0.95), check_green=True
             )
-            
-            # Overview 截图 -> 匹配 overview_templates (开启反向绿色检查)
             is_overview, score_overview, err_overview = process_match(
-                img_overview, self.vision.overview_templates, t_overview, check_green=True
+                img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), check_green=True
+            )
+            is_monster, score_monster, err_monster = process_match(
+                img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), check_green=False
             )
             
-            # Monster 截图 -> 匹配 monster_templates (关闭颜色检查，只要形状对就行)
-            is_monster, score_monster, err_monster = process_match(
-                img_monster, self.vision.monster_templates, t_monster, check_green=False
+            # 2. 探针检测 (独立逻辑，类似 Monster 不查颜色)
+            is_probe, score_probe, err_probe = process_match(
+                img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), check_green=False
             )
 
             self.status["local"] = is_local
             self.status["overview"] = is_overview
             self.status["monster"] = is_monster
+            self.status["probe"] = is_probe
 
-            # 报警逻辑
+            # === 探针独立信号 ===
+            if is_probe:
+                self.probe_signal.emit(True)
+
+            # === 主报警逻辑 ===
             has_threat = is_local or is_overview
             sound_to_play = None
             if has_threat and is_monster: sound_to_play = "mixed"
@@ -101,7 +103,8 @@ class AlarmWorker(QObject):
 
             status_desc = (f"[L:{int(is_local)}({fmt(score_local, err_local)}) | "
                            f"O:{int(is_overview)}({fmt(score_overview, err_overview)}) | "
-                           f"M:{int(is_monster)}({fmt(score_monster, err_monster)})]")
+                           f"M:{int(is_monster)}({fmt(score_monster, err_monster)}) | "
+                           f"P:{int(is_probe)}({fmt(score_probe, err_probe)})]")
             
             if sound_to_play:
                 log_msg = f"[{now_str}] ⚠️ 触发: {sound_to_play.upper()} {status_desc}"
@@ -112,6 +115,11 @@ class AlarmWorker(QObject):
                     try:
                         threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':sound_to_play}}).start()
                     except: pass
+                time.sleep(2.0)
+            elif is_probe:
+                # 只有探针触发，主报警没有触发时，也打一条日志
+                log_msg = f"[{now_str}] ⚠️ 探针: PROBE {status_desc}"
+                self.log_signal.emit(log_msg)
                 time.sleep(2.0)
             else:
                 log_msg = f"[{now_str}] ✅ 安全 {status_desc}"
