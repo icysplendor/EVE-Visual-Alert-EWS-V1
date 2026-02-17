@@ -30,9 +30,8 @@ class AlarmWorker(QObject):
 
     def _loop(self):
         while self.running:
-            # 记录开始时间，用于控制循环最小间隔
-            start_time = time.time()
-            now_str = datetime.now().strftime("%H:%M:%S")
+            now = datetime.now()
+            now_str = now.strftime("%H:%M:%S")
             
             if self.first_run:
                 self.vision.load_templates()
@@ -73,18 +72,8 @@ class AlarmWorker(QObject):
 
                 # 状态判定
                 has_threat = is_local or is_overview
+                
                 if is_probe: any_probe_triggered = True
-
-                # === 恢复全量日志 ===
-                # 无论是否有威胁，都输出详细数据
-                log_line = (
-                    f"[{now_str}] [{client_name}] "
-                    f"L:{s_loc:.2f} "
-                    f"O:{s_ovr:.2f} "
-                    f"M:{s_mon:.2f} "
-                    f"P:{s_prb:.2f}"
-                )
-                self.log_signal.emit(log_line)
 
                 # 声音优先级判定
                 if has_threat and is_monster: 
@@ -95,16 +84,26 @@ class AlarmWorker(QObject):
                     if major_sound not in ["mixed", "overview"]: major_sound = "local"
                 elif is_monster:
                     if major_sound is None: major_sound = "monster"
+                
+                # === 强制输出详细日志 ===
+                # 无论是否触发，都输出一行状态，让用户感觉到软件在工作
+                log_line = (
+                    f"[{now_str}] [{client_name}] "
+                    f"L:{s_loc:.2f} "
+                    f"O:{s_ovr:.2f} "
+                    f"M:{s_mon:.2f} "
+                    f"P:{s_prb:.2f}"
+                )
+                self.log_signal.emit(log_line)
 
             # === 循环结束后的动作 ===
             
-            # 1. 探针声音
+            # 1. 探针声音 (独立通道)
             if any_probe_triggered:
                 self.probe_signal.emit(True)
 
             # 2. 主报警声音
             if major_sound:
-                # 发送报警信号
                 alert_msg = f"[{now_str}] ⚠️ ALERT: {major_sound.upper()}"
                 self.log_signal.emit(alert_msg)
                 
@@ -113,18 +112,9 @@ class AlarmWorker(QObject):
                     try:
                         threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
                     except: pass
-                
-                # 报警后稍微冷却一下，避免声音重叠太严重
-                time.sleep(2.0)
+                time.sleep(2.0) 
             elif any_probe_triggered:
-                # 仅探针触发时的冷却
-                time.sleep(2.0)
+                time.sleep(2.0) 
             else:
-                # === 正常扫描间隔 ===
-                # 计算本次循环耗时
-                elapsed = time.time() - start_time
-                # 保证每轮扫描至少间隔 0.5 秒，避免 CPU 占用过高
-                # 如果机器性能好，截图很快，这里会等待补足 0.5 秒
-                # 如果截图很慢超过了 0.5 秒，则不等待，立即进行下一轮
-                if elapsed < 0.5:
-                    time.sleep(0.5 - elapsed)
+                # 正常扫描间隔，稍微快一点，0.5秒
+                time.sleep(0.5)
