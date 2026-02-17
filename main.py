@@ -4,7 +4,7 @@ import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QGroupBox, QDoubleSpinBox, QLineEdit, QTextEdit, 
-                             QDialog, QFrame, QGridLayout, QScrollArea, QListWidget, QListWidgetItem)
+                             QDialog, QFrame, QGridLayout, QScrollArea, QMessageBox)
 from PyQt6.QtCore import QTimer, Qt, QSize
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtMultimedia import QSoundEffect
@@ -16,25 +16,17 @@ from ui.selector import RegionSelector
 from core.audio_logic import AlarmWorker
 from core.i18n import Translator
 
-# ... (Hi-DPI 修复代码保持不变，此处省略) ...
+# =============================================================================
+# === Hi-DPI Fix ===
+# =============================================================================
 def apply_dpi_fix():
     if os.name == 'nt':
-        try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2) 
-        except Exception:
-            try:
-                ctypes.windll.shcore.SetProcessDpiAwareness(1)
-            except Exception:
-                try:
-                    ctypes.windll.user32.SetProcessDPIAware()
-                except Exception:
-                    pass
-apply_dpi_fix()
-os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "0"
-os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "0"
-os.environ["QT_SCALE_FACTOR"] = "1"
+        try: ctypes.windll.shcore.SetProcessDpiAwareness(2) 
+        except: pass
 
-# === EVE Style CSS (微调) ===
+apply_dpi_fix()
+
+# === CSS ===
 EVE_STYLE = """
 QMainWindow, QDialog { background-color: #121212; }
 QWidget { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 11px; color: #cccccc; }
@@ -45,36 +37,38 @@ QPushButton:hover { background-color: #3a3a3a; border-color: #00bcd4; }
 QPushButton:pressed { background-color: #00bcd4; color: #000; }
 QPushButton#btn_start { background-color: #1b3a2a; border: 1px solid #2e7d32; color: #4caf50; font-weight: bold; font-size: 12px; }
 QPushButton#btn_start:checked { background-color: #3b1a1a; border: 1px solid #c62828; color: #ef5350; }
-QPushButton#btn_remove { background-color: #3a1a1a; border: 1px solid #7d2e2e; color: #af4c4c; }
+QPushButton#btn_remove { background-color: #3a1a1a; border: 1px solid #7f0000; color: #ff5555; font-weight: bold; }
 QLineEdit, QDoubleSpinBox { background-color: #000; border: 1px solid #333; color: #00bcd4; padding: 2px; }
 QTextEdit { background-color: #080808; border: 1px solid #333; font-family: "Consolas", "Courier New", monospace; font-size: 10px; color: #aaa; }
 QScrollArea { border: none; background-color: transparent; }
-QListWidget { background-color: #080808; border: 1px solid #333; }
-QListWidget::item:selected { background-color: #00bcd4; color: #000; }
+QScrollBar:vertical { border: none; background: #111; width: 8px; }
+QScrollBar::handle:vertical { background: #333; min-height: 20px; }
 """
 
-# === 设置对话框 (Webhook & Audio) ===
+# === 独立的设置窗口 ===
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None, config_manager=None):
+    def __init__(self, cfg, parent=None):
         super().__init__(parent)
-        self.cfg = config_manager
+        self.cfg = cfg
         self.setWindowTitle("Advanced Settings")
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.resize(400, 300)
         self.setup_ui()
-        
+        self.setStyleSheet(EVE_STYLE)
+
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
         # Webhook
         grp_wh = QGroupBox("Webhook")
-        l_wh = QHBoxLayout()
+        l_wh = QVBoxLayout()
         self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
+        self.line_webhook.setPlaceholderText("https://discord.com/api/webhooks/...")
         self.line_webhook.textChanged.connect(lambda t: self.cfg.set("webhook_url", t))
-        l_wh.addWidget(QLabel("URL:"))
         l_wh.addWidget(self.line_webhook)
         grp_wh.setLayout(l_wh)
         layout.addWidget(grp_wh)
-        
+
         # Audio
         grp_audio = QGroupBox("Audio Assets")
         grid_audio = QGridLayout()
@@ -86,8 +80,8 @@ class SettingsDialog(QDialog):
             col = idx % 2
             
             container = QWidget()
-            h_layout = QHBoxLayout(container)
-            h_layout.setContentsMargins(0,0,0,0)
+            h = QHBoxLayout(container)
+            h.setContentsMargins(0,0,0,0)
             
             lbl_name = QLabel(key.capitalize())
             lbl_name.setFixedWidth(50)
@@ -101,9 +95,9 @@ class SettingsDialog(QDialog):
             btn_sel.setFixedSize(20, 20)
             btn_sel.clicked.connect(lambda _, k=key, l=lbl_file: self.select_audio(k, l))
             
-            h_layout.addWidget(lbl_name)
-            h_layout.addWidget(lbl_file)
-            h_layout.addWidget(btn_sel)
+            h.addWidget(lbl_name)
+            h.addWidget(lbl_file)
+            h.addWidget(btn_sel)
             grid_audio.addWidget(container, row, col)
             
         grp_audio.setLayout(grid_audio)
@@ -120,155 +114,131 @@ class SettingsDialog(QDialog):
             try:
                 rel_path = os.path.relpath(fname, cwd)
                 save_path = rel_path if not rel_path.startswith("..") else fname
-            except ValueError:
+            except:
                 save_path = fname
 
             paths = self.cfg.get("audio_paths")
             paths[key] = save_path
             self.cfg.set("audio_paths", paths)
             label_widget.setText(os.path.basename(fname))
-            # 通知主窗口重载音频
-            if self.parent():
-                self.parent().load_sounds()
+            # 通知主窗口重新加载声音（通过回调或简单的假设用户重启监控）
 
-# === 调试窗口 (支持多组切换) ===
-class DebugWindow(QDialog):
-    def __init__(self, parent=None, vision_engine=None, config_manager=None):
-        super().__init__(parent)
-        self.vision = vision_engine
-        self.cfg = config_manager
-        self.setWindowTitle("LIVE VIEW")
-        self.resize(700, 550)
-        
-        main_layout = QHBoxLayout(self)
-        
-        # 左侧列表
-        self.list_groups = QListWidget()
-        self.list_groups.setFixedWidth(120)
-        self.list_groups.currentRowChanged.connect(self.refresh_view)
-        main_layout.addWidget(self.list_groups)
-        
-        # 右侧图像
-        right_panel = QWidget()
-        self.img_layout = QHBoxLayout(right_panel)
-        self.labels = {}
-        for key in ["Local", "Overview", "Npc", "Probe"]:
-            vbox = QVBoxLayout()
-            lbl_title = QLabel(key)
-            lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl_img = QLabel()
-            lbl_img.setFixedSize(120, 500)
-            lbl_img.setStyleSheet("border: 1px solid #333; background: #000;")
-            lbl_img.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
-            vbox.addWidget(lbl_title)
-            vbox.addWidget(lbl_img)
-            self.img_layout.addLayout(vbox)
-            self.labels[key] = lbl_img
-        
-        main_layout.addWidget(right_panel)
-        
-    def refresh_list(self):
-        self.list_groups.clear()
-        groups = self.cfg.get("groups")
-        for g in groups:
-            self.list_groups.addItem(g.get("name"))
-        if self.list_groups.count() > 0:
-            self.list_groups.setCurrentRow(0)
-
-    def refresh_view(self, index):
-        pass # 由 timer 调用 update_images
-
-    def update_images(self):
-        idx = self.list_groups.currentRow()
-        if idx < 0: return
-        
-        groups = self.cfg.get("groups")
-        if idx >= len(groups): return
-        
-        regions = groups[idx].get("regions", {})
-        
-        def update_lbl(key, r_key):
-            img = self.vision.capture_screen(regions.get(r_key))
-            if img is not None:
-                h, w, ch = img.shape
-                bytes_per_line = ch * w
-                qimg = QImage(img.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
-                pix = QPixmap.fromImage(qimg).scaled(120, 500, Qt.AspectRatioMode.KeepAspectRatio)
-                self.labels[key].setPixmap(pix)
-            else:
-                self.labels[key].clear()
-
-        update_lbl("Local", "local")
-        update_lbl("Overview", "overview")
-        update_lbl("Npc", "monster")
-        update_lbl("Probe", "probe")
-
-# === 监控组卡片组件 ===
-class GroupCard(QGroupBox):
-    def __init__(self, index, group_data, parent_window):
-        super().__init__(group_data.get("name", f"Client {index+1}"))
+# === 单个监控组控件 ===
+class GroupWidget(QGroupBox):
+    def __init__(self, group_data, index, parent_win):
+        super().__init__()
+        self.group_data = group_data
         self.index = index
-        self.win = parent_window
+        self.parent_win = parent_win
+        
+        self.setTitle(f"Client {index + 1}")
         self.setup_ui()
 
     def setup_ui(self):
         layout = QGridLayout(self)
+        layout.setContentsMargins(5, 8, 5, 5)
         layout.setSpacing(4)
-        layout.setContentsMargins(5, 15, 5, 5) # Top margin for title
 
-        # Buttons
-        btn_local = QPushButton("Local")
-        btn_ovr = QPushButton("Overvw")
-        btn_rat = QPushButton("Rats")
-        btn_prb = QPushButton("Probe")
-
-        for btn, key, r, c in [
-            (btn_local, "local", 0, 0), (btn_ovr, "overview", 0, 1),
-            (btn_rat, "monster", 1, 0), (btn_prb, "probe", 1, 1)
-        ]:
-            btn.setFixedHeight(22)
-            btn.clicked.connect(lambda _, k=key: self.win.start_region_selection(self.index, k))
-            layout.addWidget(btn, r, c)
+        # 4个功能按钮
+        self.btn_local = QPushButton("Local")
+        self.btn_overview = QPushButton("Overview")
+        self.btn_monster = QPushButton("Rats")
+        self.btn_probe = QPushButton("Probe")
         
-        # Remove Button
-        if self.index > 0: # 不允许删除第一个组
-            btn_del = QPushButton("X")
-            btn_del.setObjectName("btn_remove")
-            btn_del.setFixedSize(20, 20)
-            btn_del.clicked.connect(lambda: self.win.remove_group(self.index))
-            # 放在右上角
-            # 由于 QGroupBox 布局限制，这里简单放在 grid 下方，或者你可以用绝对定位
-            layout.addWidget(btn_del, 0, 2) 
+        # 删除按钮
+        self.btn_remove = QPushButton("X")
+        self.btn_remove.setObjectName("btn_remove")
+        self.btn_remove.setFixedSize(20, 20)
+        self.btn_remove.setToolTip("Remove this group")
+        self.btn_remove.clicked.connect(lambda: self.parent_win.remove_group(self.index))
+
+        # 布局
+        layout.addWidget(self.btn_local, 0, 0)
+        layout.addWidget(self.btn_overview, 0, 1)
+        layout.addWidget(self.btn_monster, 1, 0)
+        layout.addWidget(self.btn_probe, 1, 1)
+        # 删除按钮放在右上角，这里用一个小技巧，放在(0,2)或者覆盖
+        # 简单起见，放在第三列
+        layout.addWidget(self.btn_remove, 0, 2, 2, 1) # 跨两行
+
+        # 绑定事件
+        self.btn_local.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "local"))
+        self.btn_overview.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "overview"))
+        self.btn_monster.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "monster"))
+        self.btn_probe.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "probe"))
+
+# === 调试窗口 ===
+class DebugWindow(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("LIVE VIEW")
+        self.setStyleSheet("background-color: #000; color: #00bcd4;")
+        self.main_layout = QHBoxLayout(self)
+        self.image_labels = {} # key: (group_idx, type_key)
+
+    def setup_grid(self, num_groups):
+        # 清除旧布局
+        while self.main_layout.count():
+            item = self.main_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+            if item.layout(): 
+                # 递归清除有点麻烦，这里简单重置
+                pass
+        
+        self.image_labels = {}
+        
+        # 为每个组创建一个垂直列
+        for i in range(num_groups):
+            vbox = QVBoxLayout()
+            vbox.setSpacing(2)
+            
+            lbl_group = QLabel(f"Client {i+1}")
+            lbl_group.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl_group.setStyleSheet("font-weight: bold; color: #fff; background: #222;")
+            vbox.addWidget(lbl_group)
+            
+            for key in ["local", "overview", "monster", "probe"]:
+                lbl_img = QLabel()
+                lbl_img.setFixedSize(90, 400) # 窄长条
+                lbl_img.setStyleSheet("border: 1px solid #333; background: #111;")
+                lbl_img.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+                
+                vbox.addWidget(lbl_img)
+                self.image_labels[(i, key)] = lbl_img
+            
+            self.main_layout.addLayout(vbox)
+        
+        self.resize(110 * num_groups, 600)
+
+    def update_images(self, images_dict):
+        # images_dict: {(group_idx, key): np_img}
+        for k, img in images_dict.items():
+            if k in self.image_labels:
+                self.set_pixmap(self.image_labels[k], img)
+
+    def set_pixmap(self, label, np_img):
+        if np_img is None: 
+            label.clear()
+            return
+        h, w, ch = np_img.shape
+        bytes_per_line = ch * w
+        qimg = QImage(np_img.data, w, h, bytes_per_line, QImage.Format.Format_BGR888)
+        label.setPixmap(QPixmap.fromImage(qimg).scaled(label.width(), label.height(), Qt.AspectRatioMode.KeepAspectRatio))
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        
         self.cfg = ConfigManager()
         self.vision = VisionEngine()
         self.logic = AlarmWorker(self.cfg, self.vision)
-        self.i18n = Translator(None) 
+        self.i18n = Translator(self.refresh_ui_text) 
         
         self.init_core()
         self.setup_ui()
-        self.load_icon()
+        self.refresh_ui_text()
         
-        self.setStyleSheet(EVE_STYLE)
-        self.resize(400, 650) 
-
-        self.i18n.callback = self.refresh_ui_text 
-        saved_lang = self.cfg.get("language")
-        if saved_lang:
-            self.i18n.set_language(saved_lang)
-        else:
-            self.refresh_ui_text()
-
-    def load_icon(self):
-        # 尝试加载图标
-        icon_path = os.path.join("assets", "icon.png") # 优先 png
-        if not os.path.exists(icon_path):
-            icon_path = os.path.join("assets", "icon.ico")
-        
+        # 设置图标
+        icon_path = os.path.join("assets", "app.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -285,7 +255,16 @@ class MainWindow(QMainWindow):
         self.idle_timer = QTimer(self)
         self.idle_timer.setInterval(120 * 1000) 
         self.idle_timer.timeout.connect(self.play_idle_sound)
-        self.idle_timer.start()
+        self.idle_timer.start() 
+
+        QTimer.singleShot(1000, self.check_auto_start)
+
+    def check_auto_start(self):
+        # 简单检查第一个组
+        groups = self.cfg.get("groups")
+        if groups and (groups[0]["regions"].get("local") or groups[0]["regions"].get("overview")):
+            self.log("Auto-Sequence Initiated...")
+            self.toggle_monitoring()
 
     def load_sounds(self):
         for key in ["local", "overview", "monster", "mixed", "probe", "idle"]:
@@ -295,8 +274,6 @@ class MainWindow(QMainWindow):
                 effect.setSource(QUrl.fromLocalFile(path))
                 effect.setVolume(1.0)
                 self.sounds[key] = effect
-            else:
-                if key in self.sounds: del self.sounds[key]
 
     def play_idle_sound(self):
         if not self.logic.running and "idle" in self.sounds:
@@ -306,154 +283,163 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         self.central = QWidget()
         self.setCentralWidget(self.central)
+        self.resize(380, 650)
         
         main_layout = QVBoxLayout(self.central)
         main_layout.setSpacing(8)
-        main_layout.setContentsMargins(10, 10, 10, 10)
+        main_layout.setContentsMargins(12, 12, 12, 12)
 
-        # === 顶部 ===
-        top_layout = QHBoxLayout()
+        # 1. 顶部标题
+        top = QHBoxLayout()
         self.lbl_title = QLabel("EVE ALERT")
-        self.lbl_title.setStyleSheet("font-size: 14px; font-weight: bold; color: #fff;")
-        
-        btn_settings = QPushButton("⚙️")
-        btn_settings.setFixedSize(30, 20)
-        btn_settings.clicked.connect(self.open_settings)
-
+        self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #fff;")
         self.btn_lang = QPushButton("EN")
         self.btn_lang.setFixedSize(30, 20)
         self.btn_lang.clicked.connect(self.toggle_language)
-        
-        top_layout.addWidget(self.lbl_title)
-        top_layout.addStretch()
-        top_layout.addWidget(btn_settings)
-        top_layout.addWidget(self.btn_lang)
-        main_layout.addLayout(top_layout)
+        top.addWidget(self.lbl_title)
+        top.addStretch()
+        top.addWidget(self.btn_lang)
+        main_layout.addLayout(top)
 
-        # === 监控组列表 (Scroll Area) ===
-        self.scroll_area = QScrollArea()
-        self.scroll_area.setWidgetResizable(True)
+        # 2. 监控组列表 (Scroll Area)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setSpacing(10)
-        self.scroll_layout.addStretch() # Push items up
-        self.scroll_area.setWidget(self.scroll_content)
+        self.scroll_layout.setContentsMargins(0,0,0,0)
+        self.scroll_layout.setSpacing(5)
+        self.scroll_layout.addStretch() # 弹簧在底部
+        self.scroll.setWidget(self.scroll_content)
         
-        main_layout.addWidget(self.scroll_area)
-        
-        # 添加组按钮
+        main_layout.addWidget(self.scroll, 1) # 占用主要空间
+
+        # 刷新组列表
+        self.refresh_group_list()
+
+        # 3. 添加组按钮
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
+        self.btn_add_group.setFixedHeight(28)
         self.btn_add_group.clicked.connect(self.add_group)
         main_layout.addWidget(self.btn_add_group)
 
-        # === 阈值设置 (保留在主界面) ===
-        self.grp_thresh = QGroupBox("Thresholds")
-        grid_thresh = QGridLayout()
-        grid_thresh.setSpacing(4)
+        # 4. 全局阈值 (Compact Grid)
+        self.grp_thresh = QGroupBox("Global Thresholds")
+        grid_th = QGridLayout()
+        grid_th.setContentsMargins(5, 8, 5, 5)
         
-        def create_thresh_ctrl(label_text, config_key, r, c):
-            lbl = QLabel(label_text)
-            spin = QDoubleSpinBox()
-            spin.setRange(0.1, 1.0)
-            spin.setSingleStep(0.01)
-            spin.setValue(self.cfg.get("thresholds").get(config_key, 0.95))
-            spin.valueChanged.connect(lambda v: self.update_cfg("thresholds", config_key, v))
-            grid_thresh.addWidget(lbl, r, c*2)
-            grid_thresh.addWidget(spin, r, c*2+1)
-            return lbl, spin
-
-        self.lbl_th_local, self.spin_local = create_thresh_ctrl("Loc %", "local", 0, 0)
-        self.lbl_th_over, self.spin_over = create_thresh_ctrl("Ovr %", "overview", 0, 1)
-        self.lbl_th_npc, self.spin_npc = create_thresh_ctrl("Rat %", "monster", 1, 0)
-        self.lbl_th_probe, self.spin_probe = create_thresh_ctrl("Prb %", "probe", 1, 1)
+        def mk_th(label, key, r, c):
+            lbl = QLabel(label)
+            sp = QDoubleSpinBox()
+            sp.setRange(0.1, 1.0)
+            sp.setSingleStep(0.01)
+            sp.setValue(self.cfg.get("thresholds").get(key, 0.95))
+            sp.valueChanged.connect(lambda v: self.update_cfg("thresholds", key, v))
+            grid_th.addWidget(lbl, r, c*2)
+            grid_th.addWidget(sp, r, c*2+1)
+            return lbl
+            
+        self.lbl_th_l = mk_th("Loc", "local", 0, 0)
+        self.lbl_th_o = mk_th("Ovr", "overview", 0, 1)
+        self.lbl_th_m = mk_th("Rat", "monster", 1, 0)
+        self.lbl_th_p = mk_th("Prb", "probe", 1, 1)
         
-        self.grp_thresh.setLayout(grid_thresh)
+        self.grp_thresh.setLayout(grid_th)
         main_layout.addWidget(self.grp_thresh)
 
-        # === 底部控制 ===
-        layout_ctrl = QHBoxLayout()
+        # 5. 底部控制栏
+        bot = QHBoxLayout()
+        
+        self.btn_settings = QPushButton("⚙ SETTINGS")
+        self.btn_settings.setFixedSize(80, 40)
+        self.btn_settings.clicked.connect(self.open_settings)
+        
         self.btn_start = QPushButton("ENGAGE")
-        self.btn_start.setObjectName("btn_start") 
-        self.btn_start.setFixedHeight(40) 
+        self.btn_start.setObjectName("btn_start")
+        self.btn_start.setFixedHeight(40)
         self.btn_start.clicked.connect(self.toggle_monitoring)
         
         self.btn_debug = QPushButton("VIEW")
         self.btn_debug.setObjectName("btn_debug")
-        self.btn_debug.setFixedSize(80, 40) 
+        self.btn_debug.setFixedSize(60, 40)
         self.btn_debug.clicked.connect(self.show_debug_window)
         
-        layout_ctrl.addWidget(self.btn_start)
-        layout_ctrl.addWidget(self.btn_debug)
-        main_layout.addLayout(layout_ctrl)
+        bot.addWidget(self.btn_settings)
+        bot.addWidget(self.btn_start)
+        bot.addWidget(self.btn_debug)
+        main_layout.addLayout(bot)
 
-        # === 日志 ===
+        # 6. 日志
         self.txt_log = QTextEdit()
+        self.txt_log.setFixedHeight(80)
         self.txt_log.setReadOnly(True)
-        self.txt_log.setFixedHeight(100)
         self.txt_log.setFrameShape(QFrame.Shape.NoFrame)
         main_layout.addWidget(self.txt_log)
         
-        self.debug_window = DebugWindow(self, self.vision, self.cfg)
-        
-        # 初始化组显示
-        self.refresh_groups_ui()
+        self.debug_window = DebugWindow(self)
         self.log(self.i18n.get("log_ready"))
 
-    def refresh_groups_ui(self):
-        # 清空现有组
-        for i in reversed(range(self.scroll_layout.count())): 
-            item = self.scroll_layout.itemAt(i)
+    def refresh_group_list(self):
+        # 清除现有
+        while self.scroll_layout.count() > 1: # 保留最后一个 stretch
+            item = self.scroll_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-            elif item.spacerItem(): self.scroll_layout.removeItem(item)
             
         groups = self.cfg.get("groups")
-        for idx, grp in enumerate(groups):
-            card = GroupCard(idx, grp, self)
-            self.scroll_layout.addWidget(card)
+        for i, grp in enumerate(groups):
+            w = GroupWidget(grp, i, self)
+            self.scroll_layout.insertWidget(i, w)
             
-        self.scroll_layout.addStretch()
+        # 禁用添加按钮如果超过5个
+        self.btn_add_group.setEnabled(len(groups) < 5)
 
     def add_group(self):
         groups = self.cfg.get("groups")
-        if len(groups) >= 5:
-            self.log("Max 5 groups allowed.")
-            return
-            
+        if len(groups) >= 5: return
+        
+        new_id = len(groups)
         new_group = {
-            "name": f"Client {len(groups) + 1}",
+            "id": new_id,
+            "name": f"Client {new_id+1}",
             "regions": {"local": None, "overview": None, "monster": None, "probe": None}
         }
         groups.append(new_group)
         self.cfg.set("groups", groups)
-        self.refresh_groups_ui()
+        self.refresh_group_list()
+        self.log(f"Added Client {new_id+1}")
 
     def remove_group(self, index):
         groups = self.cfg.get("groups")
-        if 0 < index < len(groups):
-            del groups[index]
-            # 重命名后续组以保持顺序
-            for i in range(len(groups)):
-                groups[i]["name"] = f"Client {i+1}"
-            self.cfg.set("groups", groups)
-            self.refresh_groups_ui()
-
-    def start_region_selection(self, group_index, region_key):
-        self.selector = RegionSelector()
-        self.selector.selection_finished.connect(
-            lambda rect: self.save_region(group_index, region_key, rect)
-        )
-        self.selector.show()
-
-    def save_region(self, grp_idx, key, rect):
-        groups = self.cfg.get("groups")
-        if grp_idx < len(groups):
-            groups[grp_idx]["regions"][key] = list(rect)
-            self.cfg.set("groups", groups)
-            self.log(f"Updated: Client {grp_idx+1} -> {key.upper()}")
+        if len(groups) <= 1:
+            self.log("Cannot remove the last group.")
+            return
+            
+        groups.pop(index)
+        # 重置ID和名称
+        for i, g in enumerate(groups):
+            g["id"] = i
+            g["name"] = f"Client {i+1}"
+            
+        self.cfg.set("groups", groups)
+        self.refresh_group_list()
+        self.log(f"Removed Client Group")
 
     def open_settings(self):
-        dlg = SettingsDialog(self, self.cfg)
+        dlg = SettingsDialog(self.cfg, self)
         dlg.exec()
+        # 重新加载声音
+        self.load_sounds()
+
+    def start_region_selection(self, group_index, key):
+        self.selector = RegionSelector()
+        self.selector.selection_finished.connect(lambda rect: self.save_region(group_index, key, rect))
+        self.selector.show()
+
+    def save_region(self, group_index, key, rect):
+        groups = self.cfg.get("groups")
+        if 0 <= group_index < len(groups):
+            groups[group_index]["regions"][key] = list(rect)
+            self.cfg.set("groups", groups)
+            self.log(f"Client {group_index+1} {key.upper()} Set.")
 
     def update_cfg(self, section, key, val):
         t = self.cfg.get(section)
@@ -464,19 +450,16 @@ class MainWindow(QMainWindow):
         _ = self.i18n.get
         self.setWindowTitle(_("window_title"))
         self.lbl_title.setText(_("window_title"))
-        self.btn_add_group.setText("+ ADD CLIENT GROUP") # 暂不翻译
-        self.grp_thresh.setTitle(_("grp_config"))
-        
-        self.lbl_th_local.setText(_("lbl_th_local"))
-        self.lbl_th_over.setText(_("lbl_th_over"))
-        self.lbl_th_npc.setText(_("lbl_th_npc"))
-        self.lbl_th_probe.setText(_("lbl_th_probe"))
+        self.btn_add_group.setText(_("btn_add"))
+        self.grp_thresh.setTitle(_("grp_thresh"))
         
         if not self.logic.running:
             self.btn_start.setText(_("btn_start"))
         else:
             self.btn_start.setText(_("btn_stop"))
+            
         self.btn_debug.setText(_("btn_debug"))
+        self.btn_settings.setText(_("btn_settings"))
         self.btn_lang.setText(_("btn_lang"))
 
     def toggle_language(self):
@@ -486,16 +469,15 @@ class MainWindow(QMainWindow):
     def toggle_monitoring(self):
         _ = self.i18n.get
         if not self.logic.running:
-            # 简单检查：至少有一个组设置了区域
+            # 检查是否有任意一个区域被设置
             groups = self.cfg.get("groups")
-            valid = False
+            any_set = False
             for g in groups:
-                r = g.get("regions", {})
-                if r.get("local") or r.get("overview"):
-                    valid = True
+                if g["regions"].get("local") or g["regions"].get("overview"):
+                    any_set = True
                     break
             
-            if not valid:
+            if not any_set:
                 self.log(_("log_region_err"))
                 return
 
@@ -522,11 +504,13 @@ class MainWindow(QMainWindow):
                     break
 
     def handle_probe_signal(self, detected):
-        if detected and "probe" in self.sounds:
-            self.sounds["probe"].play()
+        if detected:
+            if "probe" in self.sounds:
+                self.sounds["probe"].play()
 
     def show_debug_window(self):
-        self.debug_window.refresh_list()
+        groups = self.cfg.get("groups")
+        self.debug_window.setup_grid(len(groups))
         self.debug_window.show()
         self.debug_timer.start(100)
 
@@ -534,7 +518,19 @@ class MainWindow(QMainWindow):
         if not self.debug_window.isVisible():
             self.debug_timer.stop()
             return
-        self.debug_window.update_images()
+        
+        groups = self.cfg.get("groups")
+        images_to_show = {}
+        
+        for i, grp in enumerate(groups):
+            regions = grp["regions"]
+            # 批量截图
+            images_to_show[(i, "local")] = self.vision.capture_screen(regions.get("local"))
+            images_to_show[(i, "overview")] = self.vision.capture_screen(regions.get("overview"))
+            images_to_show[(i, "monster")] = self.vision.capture_screen(regions.get("monster"))
+            images_to_show[(i, "probe")] = self.vision.capture_screen(regions.get("probe"))
+            
+        self.debug_window.update_images(images_to_show)
 
     def log(self, text):
         self.txt_log.append(text)
