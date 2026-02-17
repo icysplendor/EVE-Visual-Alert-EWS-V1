@@ -4,8 +4,8 @@ import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QGroupBox, QDoubleSpinBox, QLineEdit, QTextEdit, 
-                             QDialog, QFrame, QGridLayout, QScrollArea, QMessageBox)
-from PyQt6.QtCore import QTimer, Qt, QSize
+                             QDialog, QFrame, QGridLayout, QScrollArea)
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtCore import QUrl
@@ -15,6 +15,19 @@ from core.vision import VisionEngine
 from ui.selector import RegionSelector
 from core.audio_logic import AlarmWorker
 from core.i18n import Translator
+
+# =============================================================================
+# === 资源路径处理 (修复打包后找不到图标的问题) ===
+# =============================================================================
+def resource_path(relative_path):
+    """ 获取资源的绝对路径，兼容开发环境和 PyInstaller 打包环境 """
+    try:
+        # PyInstaller 创建临时文件夹将路径存储在 _MEIPASS 中
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 # =============================================================================
 # === Hi-DPI Fix ===
@@ -53,6 +66,12 @@ class SettingsDialog(QDialog):
         self.setWindowTitle("Advanced Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self.resize(400, 300)
+        
+        # 设置窗口图标
+        icon_path = resource_path(os.path.join("assets", "app.ico"))
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            
         self.setup_ui()
         self.setStyleSheet(EVE_STYLE)
 
@@ -121,7 +140,6 @@ class SettingsDialog(QDialog):
             paths[key] = save_path
             self.cfg.set("audio_paths", paths)
             label_widget.setText(os.path.basename(fname))
-            # 通知主窗口重新加载声音（通过回调或简单的假设用户重启监控）
 
 # === 单个监控组控件 ===
 class GroupWidget(QGroupBox):
@@ -152,16 +170,12 @@ class GroupWidget(QGroupBox):
         self.btn_remove.setToolTip("Remove this group")
         self.btn_remove.clicked.connect(lambda: self.parent_win.remove_group(self.index))
 
-        # 布局
         layout.addWidget(self.btn_local, 0, 0)
         layout.addWidget(self.btn_overview, 0, 1)
         layout.addWidget(self.btn_monster, 1, 0)
         layout.addWidget(self.btn_probe, 1, 1)
-        # 删除按钮放在右上角，这里用一个小技巧，放在(0,2)或者覆盖
-        # 简单起见，放在第三列
-        layout.addWidget(self.btn_remove, 0, 2, 2, 1) # 跨两行
+        layout.addWidget(self.btn_remove, 0, 2, 2, 1)
 
-        # 绑定事件
         self.btn_local.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "local"))
         self.btn_overview.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "overview"))
         self.btn_monster.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "monster"))
@@ -172,22 +186,23 @@ class DebugWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("LIVE VIEW")
+        
+        # 设置窗口图标
+        icon_path = resource_path(os.path.join("assets", "app.ico"))
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
+            
         self.setStyleSheet("background-color: #000; color: #00bcd4;")
         self.main_layout = QHBoxLayout(self)
-        self.image_labels = {} # key: (group_idx, type_key)
+        self.image_labels = {} 
 
     def setup_grid(self, num_groups):
-        # 清除旧布局
         while self.main_layout.count():
             item = self.main_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
-            if item.layout(): 
-                # 递归清除有点麻烦，这里简单重置
-                pass
         
         self.image_labels = {}
         
-        # 为每个组创建一个垂直列
         for i in range(num_groups):
             vbox = QVBoxLayout()
             vbox.setSpacing(2)
@@ -199,7 +214,7 @@ class DebugWindow(QDialog):
             
             for key in ["local", "overview", "monster", "probe"]:
                 lbl_img = QLabel()
-                lbl_img.setFixedSize(90, 400) # 窄长条
+                lbl_img.setFixedSize(90, 400) 
                 lbl_img.setStyleSheet("border: 1px solid #333; background: #111;")
                 lbl_img.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
                 
@@ -211,7 +226,6 @@ class DebugWindow(QDialog):
         self.resize(110 * num_groups, 600)
 
     def update_images(self, images_dict):
-        # images_dict: {(group_idx, key): np_img}
         for k, img in images_dict.items():
             if k in self.image_labels:
                 self.set_pixmap(self.image_labels[k], img)
@@ -237,8 +251,8 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.refresh_ui_text()
         
-        # 设置图标
-        icon_path = os.path.join("assets", "app.ico")
+        # 设置主窗口图标 (使用 resource_path 确保打包后能找到)
+        icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -260,7 +274,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(1000, self.check_auto_start)
 
     def check_auto_start(self):
-        # 简单检查第一个组
         groups = self.cfg.get("groups")
         if groups and (groups[0]["regions"].get("local") or groups[0]["regions"].get("overview")):
             self.log("Auto-Sequence Initiated...")
@@ -308,15 +321,12 @@ class MainWindow(QMainWindow):
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(0,0,0,0)
         self.scroll_layout.setSpacing(5)
-        self.scroll_layout.addStretch() # 弹簧在底部
+        self.scroll_layout.addStretch() 
         self.scroll.setWidget(self.scroll_content)
         
-        main_layout.addWidget(self.scroll, 1) # 占用主要空间
+        main_layout.addWidget(self.scroll, 1) 
 
-        # 刷新组列表
-        self.refresh_group_list()
-
-        # 3. 添加组按钮
+        # 3. 添加组按钮 (必须在 refresh_group_list 之前定义)
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
         self.btn_add_group.setFixedHeight(28)
         self.btn_add_group.clicked.connect(self.add_group)
@@ -378,6 +388,10 @@ class MainWindow(QMainWindow):
         self.debug_window = DebugWindow(self)
         self.log(self.i18n.get("log_ready"))
 
+        # === 关键修复：最后再刷新列表 ===
+        # 此时 self.btn_add_group 已经创建完毕，不会报错了
+        self.refresh_group_list()
+
     def refresh_group_list(self):
         # 清除现有
         while self.scroll_layout.count() > 1: # 保留最后一个 stretch
@@ -390,7 +404,8 @@ class MainWindow(QMainWindow):
             self.scroll_layout.insertWidget(i, w)
             
         # 禁用添加按钮如果超过5个
-        self.btn_add_group.setEnabled(len(groups) < 5)
+        if hasattr(self, 'btn_add_group'):
+            self.btn_add_group.setEnabled(len(groups) < 5)
 
     def add_group(self):
         groups = self.cfg.get("groups")
