@@ -47,14 +47,13 @@ class AlarmWorker(QObject):
             groups = self.cfg.get("groups")
             thresholds = self.cfg.get("thresholds")
             
-            # 状态聚合
-            global_threat = {
-                "local": False, "overview": False, "monster": False, "probe": False
-            }
-            triggered_client_names = []
-            
-            # 遍历所有组
+            any_probe_triggered = False
+            any_major_threat = False
+            major_sound = None
+
+            # === 逐个客户端检测 ===
             for grp in groups:
+                client_name = grp["name"]
                 regions = grp["regions"]
                 
                 # 截图
@@ -63,59 +62,66 @@ class AlarmWorker(QObject):
                 img_monster = self.vision.capture_screen(regions.get("monster"))
                 img_probe = self.vision.capture_screen(regions.get("probe"))
 
-                # 匹配辅助
+                # 匹配
                 def check(img, tmpls, th, color_check):
                     _, score = self.vision.match_templates(img, tmpls, th, True, color_check)
-                    return score >= th
+                    return score >= th, score
 
-                # 检测
-                is_local = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
-                is_overview = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
-                is_monster = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
-                is_probe = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
+                is_local, s_loc = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
+                is_overview, s_ovr = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
+                is_monster, s_mon = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
+                is_probe, s_prb = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
 
-                # 聚合状态
-                if is_local: global_threat["local"] = True
-                if is_overview: global_threat["overview"] = True
-                if is_monster: global_threat["monster"] = True
-                if is_probe: global_threat["probe"] = True
+                # 状态判定
+                has_threat = is_local or is_overview
                 
-                if is_local or is_overview or is_probe:
-                    triggered_client_names.append(grp["name"])
+                if is_probe: any_probe_triggered = True
+                if has_threat: any_major_threat = True
 
-            # === 信号发射 ===
-            if global_threat["probe"]:
+                # 确定当前客户端的显示符号
+                def ico(cond): return "🔴" if cond else "🟢"
+                
+                # 详细日志行
+                # 格式: [Client 1] 🟢Loc(0.12) 🟢Ovr(0.00) 🟢Rat(0.00) 🔴Prb(0.98)
+                log_line = (
+                    f"[{client_name}] "
+                    f"{ico(is_local)}L:{s_loc:.2f} "
+                    f"{ico(is_overview)}O:{s_ovr:.2f} "
+                    f"{ico(is_monster)}M:{s_mon:.2f} "
+                    f"{ico(is_probe)}P:{s_prb:.2f}"
+                )
+                
+                # 只有当有威胁，或者探针触发时，或者每隔一定周期(为了不刷屏)才输出
+                # 为了满足用户"详细日志"的需求，我们输出每一行，但可能需要界面上控制一下频率
+                # 这里我们全部输出
+                self.log_signal.emit(log_line)
+
+                # 声音优先级判定 (保留最高优先级的)
+                if has_threat and is_monster: 
+                    if major_sound != "mixed": major_sound = "mixed"
+                elif is_overview:
+                    if major_sound not in ["mixed"]: major_sound = "overview"
+                elif is_local:
+                    if major_sound not in ["mixed", "overview"]: major_sound = "local"
+                elif is_monster:
+                    if major_sound is None: major_sound = "monster"
+
+            # === 循环结束后的动作 ===
+            
+            # 发送探针信号
+            if any_probe_triggered:
                 self.probe_signal.emit(True)
 
-            # 主报警逻辑
-            has_threat = global_threat["local"] or global_threat["overview"]
-            sound_to_play = None
-            
-            if has_threat and global_threat["monster"]: sound_to_play = "mixed"
-            elif global_threat["overview"]: sound_to_play = "overview"
-            elif global_threat["local"]: sound_to_play = "local"
-            elif global_threat["monster"]: sound_to_play = "monster"
-
-            # 构建日志
-            clients_str = ",".join(triggered_client_names) if triggered_client_names else "None"
-            
-            if sound_to_play:
-                log_msg = f"[{now_str}] ⚠️ {sound_to_play.upper()} (Clients: {clients_str})"
-                self.log_signal.emit(log_msg)
-                
+            # 发送主报警信号
+            if major_sound:
+                self.log_signal.emit(f"⚠️ SOUND TRIGGER: {major_sound.upper()}")
                 webhook = self.cfg.get("webhook_url")
                 if webhook:
                     try:
-                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':sound_to_play}}).start()
+                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
                     except: pass
-                time.sleep(2.0)
-            elif global_threat["probe"]:
-                log_msg = f"[{now_str}] ⚠️ PROBE (Clients: {clients_str})"
-                self.log_signal.emit(log_msg)
-                time.sleep(2.0)
+                time.sleep(2.0) # 报警后冷却
+            elif any_probe_triggered:
+                time.sleep(2.0) # 探针冷却
             else:
-                # 只有在调试或需要心跳时才输出安全日志，避免多开刷屏
-                # 这里我们降低安全日志频率，或者只输出简单的
-                log_msg = f"[{now_str}] ✅ Safe Scanning {len(groups)} Groups"
-                self.log_signal.emit(log_msg)
-                time.sleep(0.5)
+                time.sleep(0.5) # 正常扫描间隔
