@@ -8,10 +8,13 @@ LANGUAGES = {
         "btn_stop": "停止运行",
         "btn_debug": "实时画面",
         "btn_lang": "EN",
+        
+        # 新增的客户端内部按钮翻译
         "btn_local": "本地栏",
         "btn_overview": "总览栏",
         "btn_npc": "怪物栏",
-        "btn_probe": "探针扫描",
+        "btn_probe": "探针",
+        
         "log_ready": "系统就绪。请添加客户端并设置区域。",
         "log_start": ">>> 监控已启动",
         "log_stop": ">>> 监控已停止",
@@ -27,10 +30,13 @@ LANGUAGES = {
         "btn_stop": "STOP",
         "btn_debug": "VIEW",
         "btn_lang": "CN",
+        
+        # 新增的客户端内部按钮翻译
         "btn_local": "LOCAL",
         "btn_overview": "OVERVIEW",
         "btn_npc": "RATS",
         "btn_probe": "PROBE",
+        
         "log_ready": "System Ready. Add clients to begin.",
         "log_start": ">>> Monitoring Engaged",
         "log_stop": ">>> Monitoring Halted",
