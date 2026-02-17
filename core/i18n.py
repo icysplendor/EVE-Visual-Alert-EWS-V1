@@ -1,15 +1,3 @@
-非常抱歉，你是对的。我在 `main.py` 中调用了翻译键值，但忘记在 `i18n.py` 中定义它们了。这会导致按钮上显示的是键名而不是实际的文字。
-
-请更新 `i18n.py` 文件，补充缺失的翻译项。
-
-### `i18n.py`
-
-主要修改点：
-1.  增加了 `btn_probe` 的翻译。
-2.  调整了部分日志信息的格式以匹配新的纯文本风格。
-3.  补充了 `btn_add` (添加客户端组) 的翻译。
-
-```python
 LANGUAGES = {
     "CN": {
         "window_title": "EVE 视觉警报 (多开版)",
@@ -68,6 +56,3 @@ class Translator:
     def toggle(self):
         new_lang = "EN" if self.lang == "CN" else "CN"
         self.set_language(new_lang)
-```
-
-本次回复已完毕。
