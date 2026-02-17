@@ -1,6 +1,5 @@
 name: Build EXE for Windows
 
-# 修改点1：改为 workflow_dispatch，仅允许手动触发
 on:
   workflow_dispatch:
 
@@ -23,13 +22,12 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # 这一步生成 exe 文件在 dist 文件夹中
-        pyinstaller --onefile --noconsole --name "EVE_Warning" main.py
+        # 增加 --icon 参数
+        # 确保 assets/app.ico 存在于你的仓库中
+        pyinstaller --onefile --noconsole --name "EVE_Warning" --icon="assets/app.ico" main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        # 这是你下载到的压缩包的名字
         name: EVE_Warning_Windows_Build
-        # 这是要打包进去的实际文件
         path: dist/EVE_Warning.exe
