@@ -71,7 +71,7 @@ QGroupBox::title {
     subcontrol-position: top left; 
     padding: 0 5px; 
     left: 10px; 
-    background-color: #1a1a1a; /* 标题背景与 GroupBox 一致 */
+    background-color: #1a1a1a; 
 }
 
 /* 按钮样式 */
@@ -161,7 +161,6 @@ class SettingsDialog(QDialog):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setup_ui()
-        # 再次应用样式表，确保弹窗也是深色的
         self.setStyleSheet(EVE_STYLE)
 
     def setup_ui(self):
@@ -715,15 +714,12 @@ class MainWindow(QMainWindow):
         self.debug_window.update_images(images_to_show)
 
     def log(self, text):
-        # 自动添加时间戳
-        timestamp = QTimer().metaObject().className() # 随便用个对象获取当前时间有点麻烦，直接用 python 的
-        from datetime import datetime
-        now_str = datetime.now().strftime("[%H:%M:%S] ")
-        
-        # 如果 text 已经自带时间戳（来自 logic），就不加了
+        # 自动添加时间戳逻辑
         if text.startswith("["):
             final_text = text
         else:
+            from datetime import datetime
+            now_str = datetime.now().strftime("[%H:%M:%S] ")
             final_text = now_str + text
             
         self.txt_log.append(final_text)
