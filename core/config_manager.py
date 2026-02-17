@@ -3,12 +3,19 @@ import os
 
 CONFIG_FILE = "config.json"
 
+# 默认只包含一个组
 DEFAULT_CONFIG = {
     "language": "CN",
     "groups": [
         {
+            "id": 0,
             "name": "Client 1",
-            "regions": {"local": None, "overview": None, "monster": None, "probe": None}
+            "regions": {
+                "local": None,
+                "overview": None,
+                "monster": None,
+                "probe": None
+            }
         }
     ],
     "thresholds": {
@@ -38,23 +45,12 @@ class ConfigManager:
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    
-                    # === 迁移逻辑：旧版 regions 转换为新版 groups ===
-                    if "regions" in data and isinstance(data["regions"], dict):
-                        # 如果是旧版配置，将其包裹进第一个 group
-                        old_regions = data["regions"]
-                        # 补全可能缺失的 probe
-                        if "probe" not in old_regions: old_regions["probe"] = None
-                        
-                        self.config["groups"] = [{
-                            "name": "Client 1",
-                            "regions": old_regions
-                        }]
-                        # 删除旧 key
-                        del data["regions"]
-                    
-                    # 合并其他配置
+                    # 简单的合并逻辑
                     for k, v in data.items():
+                        # 如果配置文件里是旧版的 regions 结构，强制升级为 groups
+                        if k == "regions" and "groups" not in data:
+                            continue # 忽略旧版 regions，使用默认的 groups
+                        
                         if k in self.config:
                             if k == "groups":
                                 self.config[k] = v # 直接覆盖 groups
@@ -66,8 +62,8 @@ class ConfigManager:
                                          self.config[k][sub_k] = DEFAULT_CONFIG[k].get(sub_k)
                             else:
                                 self.config[k] = v
-            except Exception as e:
-                print(f"加载配置文件失败: {e}，使用默认配置")
+            except:
+                print("加载配置文件失败，使用默认配置")
 
     def save(self):
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
@@ -82,6 +78,8 @@ class ConfigManager:
 
     def get_audio_path(self, key):
         raw_path = self.config.get("audio_paths", {}).get(key, "")
-        if not raw_path: return ""
-        if os.path.isabs(raw_path): return raw_path
+        if not raw_path:
+            return ""
+        if os.path.isabs(raw_path):
+            return raw_path
         return os.path.abspath(os.path.join(os.getcwd(), raw_path))
