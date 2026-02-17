@@ -22,10 +22,10 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # 核心修改：
-        # 1. --icon="assets/app.ico" 设置文件资源管理器看到的图标
-        # 2. --add-data="assets/app.ico;assets" 把图标文件复制到 EXE 内部，让 main.py 运行时能读取到
-        pyinstaller --onefile --noconsole --name "EVE_Warning" --icon="assets/app.ico" --add-data="assets/app.ico;assets" main.py
+        # 核心修改：使用分号分隔符 ; 来添加数据
+        # --icon 设置文件浏览器图标
+        # --add-data 设置程序内部资源
+        pyinstaller --onefile --noconsole --name "EVE_Warning" --icon="assets/app.ico" --add-data "assets/app.ico;assets" main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
