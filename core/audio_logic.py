@@ -35,10 +35,8 @@ class AlarmWorker(QObject):
             if self.first_run:
                 self.vision.load_templates()
                 report = (
-                    f"--- System Check ---\n"
-                    f"{self.vision.template_status_msg}\n"
-                    f"Color Filter: ON (> {self.vision.GREEN_PIXEL_THRESHOLD}px)\n"
-                    f"--------------------"
+                    f"[{now_str}] System Check: Templates Loaded.\n"
+                    f"[{now_str}] Color Filter: Active (> {self.vision.GREEN_PIXEL_THRESHOLD}px)"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -48,7 +46,6 @@ class AlarmWorker(QObject):
             thresholds = self.cfg.get("thresholds")
             
             any_probe_triggered = False
-            any_major_threat = False
             major_sound = None
 
             # === 逐个客户端检测 ===
@@ -76,27 +73,20 @@ class AlarmWorker(QObject):
                 has_threat = is_local or is_overview
                 
                 if is_probe: any_probe_triggered = True
-                if has_threat: any_major_threat = True
 
-                # 确定当前客户端的显示符号
-                def ico(cond): return "🔴" if cond else "🟢"
-                
-                # 详细日志行
-                # 格式: [Client 1] 🟢Loc(0.12) 🟢Ovr(0.00) 🟢Rat(0.00) 🔴Prb(0.98)
+                # 纯文本日志，无 Emoji
+                # 格式: [12:00:01] [Client 1] L:0.12 O:0.00 M:0.00 P:0.98
                 log_line = (
-                    f"[{client_name}] "
-                    f"{ico(is_local)}L:{s_loc:.2f} "
-                    f"{ico(is_overview)}O:{s_ovr:.2f} "
-                    f"{ico(is_monster)}M:{s_mon:.2f} "
-                    f"{ico(is_probe)}P:{s_prb:.2f}"
+                    f"[{now_str}] [{client_name}] "
+                    f"L:{s_loc:.2f} "
+                    f"O:{s_ovr:.2f} "
+                    f"M:{s_mon:.2f} "
+                    f"P:{s_prb:.2f}"
                 )
                 
-                # 只有当有威胁，或者探针触发时，或者每隔一定周期(为了不刷屏)才输出
-                # 为了满足用户"详细日志"的需求，我们输出每一行，但可能需要界面上控制一下频率
-                # 这里我们全部输出
                 self.log_signal.emit(log_line)
 
-                # 声音优先级判定 (保留最高优先级的)
+                # 声音优先级判定
                 if has_threat and is_monster: 
                     if major_sound != "mixed": major_sound = "mixed"
                 elif is_overview:
@@ -107,21 +97,18 @@ class AlarmWorker(QObject):
                     if major_sound is None: major_sound = "monster"
 
             # === 循环结束后的动作 ===
-            
-            # 发送探针信号
             if any_probe_triggered:
                 self.probe_signal.emit(True)
 
-            # 发送主报警信号
             if major_sound:
-                self.log_signal.emit(f"⚠️ SOUND TRIGGER: {major_sound.upper()}")
+                self.log_signal.emit(f"[{now_str}] !!! ALERT TRIGGER: {major_sound.upper()} !!!")
                 webhook = self.cfg.get("webhook_url")
                 if webhook:
                     try:
                         threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
                     except: pass
-                time.sleep(2.0) # 报警后冷却
+                time.sleep(2.0) 
             elif any_probe_triggered:
-                time.sleep(2.0) # 探针冷却
+                time.sleep(2.0) 
             else:
-                time.sleep(0.5) # 正常扫描间隔
+                time.sleep(0.5)
