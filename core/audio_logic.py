@@ -5,8 +5,8 @@ from datetime import datetime
 from PyQt6.QtCore import QObject, pyqtSignal
 
 class AlarmWorker(QObject):
-    log_signal = pyqtSignal(str)     
-    probe_signal = pyqtSignal(bool)  
+    log_signal = pyqtSignal(str)
+    probe_signal = pyqtSignal(bool)
 
     def __init__(self, config_manager, vision_engine):
         super().__init__()
@@ -35,9 +35,9 @@ class AlarmWorker(QObject):
             if self.first_run:
                 self.vision.load_templates()
                 report = (
-                    f"--- 系统自检报告 ---\n"
+                    f"--- System Check ---\n"
                     f"{self.vision.template_status_msg}\n"
-                    f"颜色过滤: 已启用\n"
+                    f"Color Filter: ON (> {self.vision.GREEN_PIXEL_THRESHOLD}px)\n"
                     f"--------------------"
                 )
                 self.log_signal.emit(report)
@@ -47,17 +47,15 @@ class AlarmWorker(QObject):
             groups = self.cfg.get("groups")
             thresholds = self.cfg.get("thresholds")
             
-            # 全局状态标志
-            global_threat = False
-            global_probe = False
-            global_sound = None
+            # 状态聚合
+            global_threat = {
+                "local": False, "overview": False, "monster": False, "probe": False
+            }
+            triggered_client_names = []
             
-            log_details = []
-
-            # 遍历每一个监控组
-            for idx, group in enumerate(groups):
-                regions = group.get("regions", {})
-                grp_name = group.get("name", f"Grp {idx+1}")
+            # 遍历所有组
+            for grp in groups:
+                regions = grp["regions"]
                 
                 # 截图
                 img_local = self.vision.capture_screen(regions.get("local"))
@@ -65,66 +63,59 @@ class AlarmWorker(QObject):
                 img_monster = self.vision.capture_screen(regions.get("monster"))
                 img_probe = self.vision.capture_screen(regions.get("probe"))
 
-                # 辅助函数
-                def process_match(img, templates, thresh, check_green=False):
-                    err_msg, score = self.vision.match_templates(
-                        img, templates, thresh, 
-                        return_max_val=True, 
-                        check_green_exclusion=check_green
-                    )
-                    is_hit = score >= thresh
-                    return is_hit, score, err_msg
+                # 匹配辅助
+                def check(img, tmpls, th, color_check):
+                    _, score = self.vision.match_templates(img, tmpls, th, True, color_check)
+                    return score >= th
 
                 # 检测
-                is_local, s_loc, _ = process_match(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
-                is_over, s_ovr, _ = process_match(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
-                is_mon, s_mon, _ = process_match(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
-                is_prb, s_prb, _ = process_match(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
+                is_local = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
+                is_overview = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
+                is_monster = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
+                is_probe = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
 
-                # 状态聚合
-                has_threat = is_local or is_over
-                if has_threat: global_threat = True
-                if is_prb: global_probe = True
-
-                # 确定当前组的最高优先级声音
-                current_sound = None
-                if has_threat and is_mon: current_sound = "mixed"
-                elif is_over: current_sound = "overview"
-                elif is_local: current_sound = "local"
-                elif is_mon: current_sound = "monster"
-
-                # 提升全局声音优先级 (Mixed > Overview > Local > Monster)
-                priority_map = {"mixed": 4, "overview": 3, "local": 2, "monster": 1, None: 0}
-                if priority_map.get(current_sound, 0) > priority_map.get(global_sound, 0):
-                    global_sound = current_sound
-
-                # 记录简报 (仅记录有状态的组，或者如果都没有状态，记录第一个组)
-                if has_threat or is_mon or is_prb:
-                    log_details.append(f"{grp_name}:[L:{int(is_local)} O:{int(is_over)} M:{int(is_mon)} P:{int(is_prb)}]")
+                # 聚合状态
+                if is_local: global_threat["local"] = True
+                if is_overview: global_threat["overview"] = True
+                if is_monster: global_threat["monster"] = True
+                if is_probe: global_threat["probe"] = True
+                
+                if is_local or is_overview or is_probe:
+                    triggered_client_names.append(grp["name"])
 
             # === 信号发射 ===
-            if global_probe:
+            if global_threat["probe"]:
                 self.probe_signal.emit(True)
 
-            if global_sound:
-                detail_str = " | ".join(log_details)
-                log_msg = f"[{now_str}] ⚠️ 触发: {global_sound.upper()} >> {detail_str}"
+            # 主报警逻辑
+            has_threat = global_threat["local"] or global_threat["overview"]
+            sound_to_play = None
+            
+            if has_threat and global_threat["monster"]: sound_to_play = "mixed"
+            elif global_threat["overview"]: sound_to_play = "overview"
+            elif global_threat["local"]: sound_to_play = "local"
+            elif global_threat["monster"]: sound_to_play = "monster"
+
+            # 构建日志
+            clients_str = ",".join(triggered_client_names) if triggered_client_names else "None"
+            
+            if sound_to_play:
+                log_msg = f"[{now_str}] ⚠️ {sound_to_play.upper()} (Clients: {clients_str})"
                 self.log_signal.emit(log_msg)
                 
                 webhook = self.cfg.get("webhook_url")
                 if webhook:
                     try:
-                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':global_sound}}).start()
+                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':sound_to_play}}).start()
                     except: pass
                 time.sleep(2.0)
-            elif global_probe:
-                # 仅探针
-                detail_str = " | ".join(log_details)
-                log_msg = f"[{now_str}] ⚠️ 探针: PROBE >> {detail_str}"
+            elif global_threat["probe"]:
+                log_msg = f"[{now_str}] ⚠️ PROBE (Clients: {clients_str})"
                 self.log_signal.emit(log_msg)
                 time.sleep(2.0)
             else:
-                # 安全 (降低日志频率，或者只打印 Safe)
-                log_msg = f"[{now_str}] ✅ 安全"
+                # 只有在调试或需要心跳时才输出安全日志，避免多开刷屏
+                # 这里我们降低安全日志频率，或者只输出简单的
+                log_msg = f"[{now_str}] ✅ Safe Scanning {len(groups)} Groups"
                 self.log_signal.emit(log_msg)
                 time.sleep(0.5)
