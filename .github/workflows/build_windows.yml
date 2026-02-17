@@ -22,9 +22,10 @@ jobs:
 
     - name: Build with PyInstaller
       run: |
-        # 增加 --icon 参数
-        # 确保 assets/app.ico 存在于你的仓库中
-        pyinstaller --onefile --noconsole --name "EVE_Warning" --icon="assets/app.ico" main.py
+        # 核心修改：
+        # 1. --icon="assets/app.ico" 设置文件资源管理器看到的图标
+        # 2. --add-data="assets/app.ico;assets" 把图标文件复制到 EXE 内部，让 main.py 运行时能读取到
+        pyinstaller --onefile --noconsole --name "EVE_Warning" --icon="assets/app.ico" --add-data="assets/app.ico;assets" main.py
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
