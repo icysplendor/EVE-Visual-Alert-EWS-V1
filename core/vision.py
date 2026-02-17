@@ -8,7 +8,7 @@ class VisionEngine:
         self.local_templates = []
         self.overview_templates = []
         self.monster_templates = []
-        self.probe_templates = [] # 新增探针模板库
+        self.probe_templates = [] 
         
         self.template_status_msg = "初始化中..."
         self.last_screenshot_shape = "无"
@@ -29,7 +29,7 @@ class VisionEngine:
         path_local = os.path.join(base_dir, "assets", "hostile_icons_local")
         path_overview = os.path.join(base_dir, "assets", "hostile_icons_overview")
         path_monster = os.path.join(base_dir, "assets", "monster_icons")
-        path_probe = os.path.join(base_dir, "assets", "probe_icons") # 新增路径
+        path_probe = os.path.join(base_dir, "assets", "probe_icons") 
         
         self.local_templates = self._load_images_from_folder(path_local)
         self.overview_templates = self._load_images_from_folder(path_overview)
@@ -57,7 +57,11 @@ class VisionEngine:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
                 try:
-                    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+                    # === 关键修改：支持中文路径 ===
+                    # 原代码: img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+                    # 新代码: 使用 numpy 读取字节流，再解码
+                    img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
+                    
                     if img is not None:
                         if img.shape[2] == 4:
                             b, g, r, a = cv2.split(img)
@@ -68,7 +72,8 @@ class VisionEngine:
                             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                             processed = self.preprocess_image(gray)
                             templates.append((processed, None))
-                except:
+                except Exception as e:
+                    print(f"Error loading {filename}: {e}")
                     pass
         return templates
 
