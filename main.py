@@ -4,8 +4,8 @@ import ctypes
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QPushButton, QLabel, QFileDialog, 
                              QGroupBox, QDoubleSpinBox, QLineEdit, QTextEdit, 
-                             QDialog, QFrame, QGridLayout, QScrollArea, QButtonGroup)
-from PyQt6.QtCore import QTimer, Qt, pyqtSignal
+                             QDialog, QFrame, QGridLayout, QScrollArea, QMessageBox)
+from PyQt6.QtCore import QTimer, Qt
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 from PyQt6.QtMultimedia import QSoundEffect
 from PyQt6.QtCore import QUrl
@@ -37,15 +37,25 @@ def apply_dpi_fix():
 apply_dpi_fix()
 
 # =============================================================================
-# === EVE STYLE CSS (Hardcore Dark Theme) ===
+# === EVE STYLE CSS (修复版：强制深色背景) ===
 # =============================================================================
 EVE_STYLE = """
-QMainWindow, QDialog { background-color: #121212; color: #ccc; }
-QWidget { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 11px; color: #cccccc; }
+/* 全局背景 */
+QMainWindow, QDialog, QWidget { 
+    background-color: #121212; 
+    color: #cccccc; 
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 11px;
+}
 
-/* 滚动区域背景透明 */
-QScrollArea { background-color: transparent; border: none; }
-QScrollArea > QWidget > QWidget { background-color: transparent; }
+/* 滚动区域修复：必须显式设置背景透明或黑色 */
+QScrollArea { 
+    background-color: #121212; 
+    border: none; 
+}
+QScrollArea > QWidget > QWidget { 
+    background-color: #121212; 
+}
 
 /* 分组框样式 */
 QGroupBox { 
@@ -61,7 +71,7 @@ QGroupBox::title {
     subcontrol-position: top left; 
     padding: 0 5px; 
     left: 10px; 
-    background-color: #121212;
+    background-color: #1a1a1a; /* 标题背景与 GroupBox 一致 */
 }
 
 /* 按钮样式 */
@@ -131,6 +141,10 @@ QTextEdit {
 QScrollBar:vertical { border: none; background: #111; width: 8px; }
 QScrollBar::handle:vertical { background: #333; min-height: 20px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+
+/* 弹窗样式 */
+QMessageBox { background-color: #121212; color: #ccc; }
+QMessageBox QPushButton { min-width: 60px; }
 """
 
 # === 设置窗口 ===
@@ -147,12 +161,12 @@ class SettingsDialog(QDialog):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setup_ui()
+        # 再次应用样式表，确保弹窗也是深色的
         self.setStyleSheet(EVE_STYLE)
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
         
-        # Webhook
         grp_wh = QGroupBox("Webhook Configuration")
         l_wh = QVBoxLayout()
         self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
@@ -162,7 +176,6 @@ class SettingsDialog(QDialog):
         grp_wh.setLayout(l_wh)
         layout.addWidget(grp_wh)
 
-        # Audio
         grp_audio = QGroupBox("Audio Assets")
         grid_audio = QGridLayout()
         grid_audio.setSpacing(10)
@@ -219,7 +232,7 @@ class SettingsDialog(QDialog):
             self.cfg.set("audio_paths", paths)
             label_widget.setText(os.path.basename(fname))
 
-# === 单个监控组控件 (EVE Style) ===
+# === 单个监控组控件 ===
 class GroupWidget(QGroupBox):
     def __init__(self, group_data, index, parent_win):
         super().__init__()
@@ -236,24 +249,26 @@ class GroupWidget(QGroupBox):
         layout.setSpacing(5)
 
         # 4个功能按钮
-        self.btn_local = QPushButton("LOCAL")
-        self.btn_overview = QPushButton("OVERVIEW")
-        self.btn_monster = QPushButton("RATS")
-        self.btn_probe = QPushButton("PROBE")
+        self.btn_local = QPushButton()
+        self.btn_overview = QPushButton()
+        self.btn_monster = QPushButton()
+        self.btn_probe = QPushButton()
         
-        # 删除按钮 (放在标题栏右侧的视觉效果)
+        # 删除按钮
         self.btn_remove = QPushButton("✖")
         self.btn_remove.setObjectName("btn_remove")
         self.btn_remove.setFixedSize(20, 20)
         self.btn_remove.setToolTip("Remove Group")
-        self.btn_remove.clicked.connect(lambda: self.parent_win.remove_group(self.index))
+        self.btn_remove.clicked.connect(self.request_remove)
+
+        # 如果是 Client 1 (index 0)，隐藏删除按钮
+        if self.index == 0:
+            self.btn_remove.setVisible(False)
 
         layout.addWidget(self.btn_local, 0, 0)
         layout.addWidget(self.btn_overview, 0, 1)
         layout.addWidget(self.btn_monster, 1, 0)
         layout.addWidget(self.btn_probe, 1, 1)
-        
-        # 删除按钮放在右上角
         layout.addWidget(self.btn_remove, 0, 2) 
 
         self.btn_local.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "local"))
@@ -261,7 +276,30 @@ class GroupWidget(QGroupBox):
         self.btn_monster.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "monster"))
         self.btn_probe.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "probe"))
 
-# === 调试窗口 (修复版：横向排列 + 组切换) ===
+        # 初始化文字
+        self.update_texts()
+
+    def update_texts(self):
+        # 从父窗口的 i18n 获取翻译
+        _ = self.parent_win.i18n.get
+        self.btn_local.setText(_("btn_local"))
+        self.btn_overview.setText(_("btn_overview"))
+        self.btn_monster.setText(_("btn_npc"))
+        self.btn_probe.setText(_("btn_probe"))
+
+    def request_remove(self):
+        # 弹出确认框
+        reply = QMessageBox.question(
+            self, 
+            'CONFIRM REMOVAL', 
+            f"Are you sure you want to remove Client {self.index + 1}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, 
+            QMessageBox.StandardButton.No
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.parent_win.remove_group(self.index)
+
+# === 调试窗口 ===
 class DebugWindow(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -272,7 +310,7 @@ class DebugWindow(QDialog):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setStyleSheet(EVE_STYLE)
-        self.resize(600, 500) # 宽一点，适应横向排列
+        self.resize(600, 500)
         
         self.current_group_idx = 0
         self.group_buttons = []
@@ -284,11 +322,9 @@ class DebugWindow(QDialog):
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(10, 10, 10, 10)
         
-        # 1. 顶部组切换栏
         self.tab_layout = QHBoxLayout()
         self.main_layout.addLayout(self.tab_layout)
         
-        # 2. 图片显示区 (横向排列)
         self.img_layout = QHBoxLayout()
         self.img_layout.setSpacing(10)
         
@@ -299,7 +335,6 @@ class DebugWindow(QDialog):
             lbl_title.setFixedHeight(20)
             
             lbl_img = QLabel()
-            # 恢复之前的窄长条设计
             lbl_img.setFixedSize(120, 500) 
             lbl_img.setStyleSheet("border: 1px solid #333; background: #000;")
             lbl_img.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
@@ -312,7 +347,6 @@ class DebugWindow(QDialog):
         self.main_layout.addLayout(self.img_layout)
 
     def refresh_tabs(self, num_groups):
-        # 清除旧按钮
         while self.tab_layout.count():
             item = self.tab_layout.takeAt(0)
             if item.widget(): item.widget().deleteLater()
@@ -328,7 +362,6 @@ class DebugWindow(QDialog):
             
         self.tab_layout.addStretch()
         
-        # 默认选中当前
         if self.current_group_idx >= num_groups:
             self.current_group_idx = 0
         if self.group_buttons:
@@ -338,26 +371,21 @@ class DebugWindow(QDialog):
         self.current_group_idx = idx
         for i, btn in enumerate(self.group_buttons):
             if i == idx:
-                btn.setObjectName("tab_active") # 使用 CSS 高亮
+                btn.setObjectName("tab_active")
                 btn.setChecked(True)
             else:
                 btn.setObjectName("")
                 btn.setChecked(False)
-            # 刷新样式以应用 setObjectName
             btn.style().unpolish(btn)
             btn.style().polish(btn)
 
     def update_images(self, all_groups_images):
-        # all_groups_images: { (group_idx, key): np_img }
-        # 只显示当前选中的组
-        
         mapping = {
             "Local": "local",
             "Overview": "overview",
             "Rats": "monster",
             "Probe": "probe"
         }
-        
         for ui_key, data_key in mapping.items():
             img = all_groups_images.get((self.current_group_idx, data_key))
             self.set_pixmap(self.image_labels[ui_key], img)
@@ -375,6 +403,9 @@ class DebugWindow(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        # 1. 应用样式表（尽早应用，防止白屏闪烁）
+        self.setStyleSheet(EVE_STYLE)
+        
         self.cfg = ConfigManager()
         self.vision = VisionEngine()
         self.logic = AlarmWorker(self.cfg, self.vision)
@@ -449,7 +480,12 @@ class MainWindow(QMainWindow):
         # 2. 监控组列表 (Scroll Area)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        # 显式设置 ScrollArea 的样式，确保它不是白色的
+        self.scroll.setStyleSheet("background-color: #121212; border: none;")
+        
         self.scroll_content = QWidget()
+        self.scroll_content.setStyleSheet("background-color: #121212;") # 确保内容也是黑色的
+        
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(0,0,0,0)
         self.scroll_layout.setSpacing(5)
@@ -461,7 +497,7 @@ class MainWindow(QMainWindow):
         # 3. 添加组按钮
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
         self.btn_add_group.setFixedHeight(32)
-        self.btn_add_group.setStyleSheet("border: 1px dashed #444; color: #888;")
+        self.btn_add_group.setStyleSheet("border: 1px dashed #444; color: #888; background-color: #1a1a1a;")
         self.btn_add_group.clicked.connect(self.add_group)
         main_layout.addWidget(self.btn_add_group)
 
@@ -555,11 +591,9 @@ class MainWindow(QMainWindow):
     def remove_group(self, index):
         groups = self.cfg.get("groups")
         if len(groups) <= 1:
-            self.log("System: Cannot remove the last group.")
             return
             
         groups.pop(index)
-        # 重置ID
         for i, g in enumerate(groups):
             g["id"] = i
             g["name"] = f"Client {i+1}"
@@ -605,6 +639,12 @@ class MainWindow(QMainWindow):
         self.btn_debug.setText(_("btn_debug"))
         self.btn_settings.setText(_("btn_settings"))
         self.btn_lang.setText(_("btn_lang"))
+
+        # 刷新所有 GroupWidget 的文字
+        for i in range(self.scroll_layout.count()):
+            item = self.scroll_layout.itemAt(i)
+            if item and item.widget() and isinstance(item.widget(), GroupWidget):
+                item.widget().update_texts()
 
     def toggle_language(self):
         self.i18n.toggle()
@@ -675,7 +715,18 @@ class MainWindow(QMainWindow):
         self.debug_window.update_images(images_to_show)
 
     def log(self, text):
-        self.txt_log.append(text)
+        # 自动添加时间戳
+        timestamp = QTimer().metaObject().className() # 随便用个对象获取当前时间有点麻烦，直接用 python 的
+        from datetime import datetime
+        now_str = datetime.now().strftime("[%H:%M:%S] ")
+        
+        # 如果 text 已经自带时间戳（来自 logic），就不加了
+        if text.startswith("["):
+            final_text = text
+        else:
+            final_text = now_str + text
+            
+        self.txt_log.append(final_text)
         sb = self.txt_log.verticalScrollBar()
         sb.setValue(sb.maximum())
 
