@@ -37,7 +37,7 @@ def apply_dpi_fix():
 apply_dpi_fix()
 
 # =============================================================================
-# === EVE STYLE CSS (修复版：强制深色背景) ===
+# === EVE STYLE CSS (增强按钮可见性) ===
 # =============================================================================
 EVE_STYLE = """
 /* 全局背景 */
@@ -48,7 +48,7 @@ QMainWindow, QDialog, QWidget {
     font-size: 11px;
 }
 
-/* 滚动区域修复：必须显式设置背景透明或黑色 */
+/* 滚动区域修复 */
 QScrollArea { 
     background-color: #121212; 
     border: none; 
@@ -74,30 +74,31 @@ QGroupBox::title {
     background-color: #1a1a1a; 
 }
 
-/* 按钮样式 */
+/* === 按钮样式增强 === */
 QPushButton { 
-    background-color: #2a2a2a; 
-    border: 1px solid #444; 
-    color: #eee; 
-    padding: 4px; 
-    border-radius: 0px; 
+    background-color: #333333; /* 稍微亮一点的灰色背景 */
+    border: 1px solid #555555; /* 明显的边框 */
+    color: #eeeeee; 
+    padding: 6px; 
+    border-radius: 2px; 
+    font-weight: bold;
 }
 QPushButton:hover { 
-    background-color: #3a3a3a; 
-    border-color: #00bcd4; 
-    color: #fff;
+    background-color: #444444; 
+    border-color: #00bcd4; /* 悬停时边框变蓝 */
+    color: #ffffff;
 }
 QPushButton:pressed { 
     background-color: #00bcd4; 
-    color: #000; 
+    color: #000000; 
+    border-color: #00bcd4;
 }
 
-/* 特殊按钮 */
+/* 特殊按钮：启动 */
 QPushButton#btn_start { 
     background-color: #1b3a2a; 
     border: 1px solid #2e7d32; 
     color: #4caf50; 
-    font-weight: bold; 
     font-size: 12px; 
 }
 QPushButton#btn_start:checked { 
@@ -105,15 +106,21 @@ QPushButton#btn_start:checked {
     border: 1px solid #c62828; 
     color: #ef5350; 
 }
+
+/* 特殊按钮：删除 (无边框风格，但悬停有反馈) */
 QPushButton#btn_remove { 
     background-color: transparent; 
     border: none; 
     color: #666; 
     font-weight: bold; 
+    font-size: 14px;
 }
 QPushButton#btn_remove:hover { 
     color: #ff5555; 
+    background-color: #2a0000;
 }
+
+/* 调试窗口标签页按钮 */
 QPushButton#tab_active {
     background-color: #00bcd4;
     color: #000;
@@ -198,7 +205,7 @@ class SettingsDialog(QDialog):
             lbl_file.setStyleSheet("color: #00bcd4; font-size: 10px;")
             
             btn_sel = QPushButton("SELECT")
-            btn_sel.setFixedSize(50, 20)
+            btn_sel.setFixedSize(60, 24) # 稍微大一点
             btn_sel.clicked.connect(lambda _, k=key, l=lbl_file: self.select_audio(k, l))
             
             h.addWidget(lbl_name)
@@ -245,7 +252,7 @@ class GroupWidget(QGroupBox):
     def setup_ui(self):
         layout = QGridLayout(self)
         layout.setContentsMargins(10, 15, 10, 10)
-        layout.setSpacing(5)
+        layout.setSpacing(8) # 增加间距
 
         # 4个功能按钮
         self.btn_local = QPushButton()
@@ -256,7 +263,7 @@ class GroupWidget(QGroupBox):
         # 删除按钮
         self.btn_remove = QPushButton("✖")
         self.btn_remove.setObjectName("btn_remove")
-        self.btn_remove.setFixedSize(20, 20)
+        self.btn_remove.setFixedSize(24, 24)
         self.btn_remove.setToolTip("Remove Group")
         self.btn_remove.clicked.connect(self.request_remove)
 
@@ -496,7 +503,7 @@ class MainWindow(QMainWindow):
         # 3. 添加组按钮
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
         self.btn_add_group.setFixedHeight(32)
-        self.btn_add_group.setStyleSheet("border: 1px dashed #444; color: #888; background-color: #1a1a1a;")
+        # 这里不需要额外的样式，会继承全局的 QPushButton 样式，保证一致性
         self.btn_add_group.clicked.connect(self.add_group)
         main_layout.addWidget(self.btn_add_group)
 
