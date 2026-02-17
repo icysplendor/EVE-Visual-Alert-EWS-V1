@@ -37,7 +37,7 @@ def apply_dpi_fix():
 apply_dpi_fix()
 
 # =============================================================================
-# === EVE STYLE CSS (增强按钮可见性) ===
+# === EVE STYLE CSS (高对比度修复版) ===
 # =============================================================================
 EVE_STYLE = """
 /* 全局背景 */
@@ -48,7 +48,7 @@ QMainWindow, QDialog, QWidget {
     font-size: 11px;
 }
 
-/* 滚动区域修复 */
+/* 滚动区域 */
 QScrollArea { 
     background-color: #121212; 
     border: none; 
@@ -57,7 +57,7 @@ QScrollArea > QWidget > QWidget {
     background-color: #121212; 
 }
 
-/* 分组框样式 */
+/* 分组框 */
 QGroupBox { 
     border: 1px solid #444; 
     border-radius: 0px; 
@@ -74,18 +74,18 @@ QGroupBox::title {
     background-color: #1a1a1a; 
 }
 
-/* === 按钮样式增强 === */
+/* === 按钮样式 (增强可见性) === */
 QPushButton { 
-    background-color: #333333; /* 稍微亮一点的灰色背景 */
-    border: 1px solid #555555; /* 明显的边框 */
+    background-color: #2b2b2b;   /* 基础背景色 */
+    border: 1px solid #777777;   /* 亮灰色边框，确保轮廓清晰 */
     color: #eeeeee; 
-    padding: 6px; 
-    border-radius: 2px; 
+    padding: 5px; 
+    border-radius: 0px;          /* EVE 风格直角 */
     font-weight: bold;
 }
 QPushButton:hover { 
-    background-color: #444444; 
-    border-color: #00bcd4; /* 悬停时边框变蓝 */
+    background-color: #3a3a3a;   /* 悬停变亮 */
+    border-color: #00bcd4;       /* 悬停边框变蓝 */
     color: #ffffff;
 }
 QPushButton:pressed { 
@@ -107,17 +107,17 @@ QPushButton#btn_start:checked {
     color: #ef5350; 
 }
 
-/* 特殊按钮：删除 (无边框风格，但悬停有反馈) */
+/* 特殊按钮：删除 */
 QPushButton#btn_remove { 
     background-color: transparent; 
     border: none; 
     color: #666; 
-    font-weight: bold; 
     font-size: 14px;
 }
 QPushButton#btn_remove:hover { 
     color: #ff5555; 
     background-color: #2a0000;
+    border: 1px solid #ff5555;
 }
 
 /* 调试窗口标签页按钮 */
@@ -129,8 +129,8 @@ QPushButton#tab_active {
 
 /* 输入框 */
 QLineEdit, QDoubleSpinBox { 
-    background-color: #080808; 
-    border: 1px solid #333; 
+    background-color: #000000; 
+    border: 1px solid #444; 
     color: #00bcd4; 
     padding: 2px; 
 }
@@ -149,7 +149,7 @@ QScrollBar:vertical { border: none; background: #111; width: 8px; }
 QScrollBar::handle:vertical { background: #333; min-height: 20px; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
 
-/* 弹窗样式 */
+/* 弹窗 */
 QMessageBox { background-color: #121212; color: #ccc; }
 QMessageBox QPushButton { min-width: 60px; }
 """
@@ -205,7 +205,7 @@ class SettingsDialog(QDialog):
             lbl_file.setStyleSheet("color: #00bcd4; font-size: 10px;")
             
             btn_sel = QPushButton("SELECT")
-            btn_sel.setFixedSize(60, 24) # 稍微大一点
+            btn_sel.setFixedSize(60, 24)
             btn_sel.clicked.connect(lambda _, k=key, l=lbl_file: self.select_audio(k, l))
             
             h.addWidget(lbl_name)
@@ -252,7 +252,7 @@ class GroupWidget(QGroupBox):
     def setup_ui(self):
         layout = QGridLayout(self)
         layout.setContentsMargins(10, 15, 10, 10)
-        layout.setSpacing(8) # 增加间距
+        layout.setSpacing(8)
 
         # 4个功能按钮
         self.btn_local = QPushButton()
@@ -267,7 +267,6 @@ class GroupWidget(QGroupBox):
         self.btn_remove.setToolTip("Remove Group")
         self.btn_remove.clicked.connect(self.request_remove)
 
-        # 如果是 Client 1 (index 0)，隐藏删除按钮
         if self.index == 0:
             self.btn_remove.setVisible(False)
 
@@ -282,11 +281,9 @@ class GroupWidget(QGroupBox):
         self.btn_monster.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "monster"))
         self.btn_probe.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "probe"))
 
-        # 初始化文字
         self.update_texts()
 
     def update_texts(self):
-        # 从父窗口的 i18n 获取翻译
         _ = self.parent_win.i18n.get
         self.btn_local.setText(_("btn_local"))
         self.btn_overview.setText(_("btn_overview"))
@@ -294,7 +291,6 @@ class GroupWidget(QGroupBox):
         self.btn_probe.setText(_("btn_probe"))
 
     def request_remove(self):
-        # 弹出确认框
         reply = QMessageBox.question(
             self, 
             'CONFIRM REMOVAL', 
@@ -409,7 +405,6 @@ class DebugWindow(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        # 1. 应用样式表（尽早应用，防止白屏闪烁）
         self.setStyleSheet(EVE_STYLE)
         
         self.cfg = ConfigManager()
@@ -476,7 +471,8 @@ class MainWindow(QMainWindow):
         self.lbl_title = QLabel("EVE ALERT SYSTEM")
         self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #fff; letter-spacing: 1px;")
         self.btn_lang = QPushButton("EN")
-        self.btn_lang.setFixedSize(30, 20)
+        # 修改点：增大尺寸以显示完整文字
+        self.btn_lang.setFixedSize(40, 25) 
         self.btn_lang.clicked.connect(self.toggle_language)
         top.addWidget(self.lbl_title)
         top.addStretch()
@@ -486,11 +482,10 @@ class MainWindow(QMainWindow):
         # 2. 监控组列表 (Scroll Area)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
-        # 显式设置 ScrollArea 的样式，确保它不是白色的
         self.scroll.setStyleSheet("background-color: #121212; border: none;")
         
         self.scroll_content = QWidget()
-        self.scroll_content.setStyleSheet("background-color: #121212;") # 确保内容也是黑色的
+        self.scroll_content.setStyleSheet("background-color: #121212;") 
         
         self.scroll_layout = QVBoxLayout(self.scroll_content)
         self.scroll_layout.setContentsMargins(0,0,0,0)
@@ -503,7 +498,7 @@ class MainWindow(QMainWindow):
         # 3. 添加组按钮
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
         self.btn_add_group.setFixedHeight(32)
-        # 这里不需要额外的样式，会继承全局的 QPushButton 样式，保证一致性
+        self.btn_add_group.setStyleSheet("border: 1px dashed #555; color: #888; background-color: #1a1a1a;")
         self.btn_add_group.clicked.connect(self.add_group)
         main_layout.addWidget(self.btn_add_group)
 
@@ -646,7 +641,6 @@ class MainWindow(QMainWindow):
         self.btn_settings.setText(_("btn_settings"))
         self.btn_lang.setText(_("btn_lang"))
 
-        # 刷新所有 GroupWidget 的文字
         for i in range(self.scroll_layout.count()):
             item = self.scroll_layout.itemAt(i)
             if item and item.widget() and isinstance(item.widget(), GroupWidget):
@@ -721,7 +715,6 @@ class MainWindow(QMainWindow):
         self.debug_window.update_images(images_to_show)
 
     def log(self, text):
-        # 自动添加时间戳逻辑
         if text.startswith("["):
             final_text = text
         else:
