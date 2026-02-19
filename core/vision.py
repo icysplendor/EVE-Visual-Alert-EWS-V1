@@ -17,7 +17,17 @@ class VisionEngine:
         # 初始化 CLAHE (保留对象备用)
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8,8))
         
-        # 移除绿色过滤器设置
+        # === 颜色过滤器设置 (HSV空间) ===
+        # 绿色友军
+        self.GREEN_LOWER = np.array([35, 40, 40])
+        self.GREEN_UPPER = np.array([85, 255, 255])
+        
+        # 蓝色友军 (EVE的蓝色通常在 100-130 之间)
+        self.BLUE_LOWER = np.array([95, 40, 40])
+        self.BLUE_UPPER = np.array([135, 255, 255])
+        
+        # 像素阈值：超过多少个像素认为是友军
+        self.SAFE_COLOR_THRESHOLD = 8 
             
         self.load_templates()
 
@@ -82,7 +92,7 @@ class VisionEngine:
         gamma_corrected = self.apply_gamma(gray_img, gamma=1.5)
         # 2. 简单的阈值截断
         _, thresholded = cv2.threshold(gamma_corrected, 30, 255, cv2.THRESH_TOZERO)
-        # 3. 移除 CLAHE
+        # 3. 移除 CLAHE (保持之前的优化)
         return thresholded
 
     def capture_screen(self, region, debug_name=None):
@@ -103,10 +113,27 @@ class VisionEngine:
             self.last_error = f"截图失败: {str(e)}"
             return None
 
-    # 移除 _is_green_region 函数
+    def _is_safe_color(self, img_crop):
+        """
+        检查图片切片中是否包含超过阈值的绿色或蓝色像素 (友军)
+        """
+        if img_crop is None or img_crop.size == 0:
+            return False
+            
+        hsv = cv2.cvtColor(img_crop, cv2.COLOR_BGR2HSV)
+        
+        # 检查绿色
+        mask_green = cv2.inRange(hsv, self.GREEN_LOWER, self.GREEN_UPPER)
+        green_count = cv2.countNonZero(mask_green)
+        
+        # 检查蓝色
+        mask_blue = cv2.inRange(hsv, self.BLUE_LOWER, self.BLUE_UPPER)
+        blue_count = cv2.countNonZero(mask_blue)
+        
+        # 只要任意一种安全颜色达标，就认为是友军
+        return (green_count > self.SAFE_COLOR_THRESHOLD) or (blue_count > self.SAFE_COLOR_THRESHOLD)
 
-    def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
-        # 移除 check_green_exclusion 参数
+    def match_templates(self, screen_img, template_list, threshold, return_max_val=False, check_safe_color=False):
         if screen_img is None:
             err = self.last_error if self.last_error else "未获取到截图"
             return (err, 0.0) if return_max_val else False
@@ -133,11 +160,21 @@ class VisionEngine:
                 else:
                     res = cv2.matchTemplate(screen_processed, tmpl_processed, cv2.TM_CCOEFF_NORMED)
                 
-                _, max_val, _, _ = cv2.minMaxLoc(res)
+                _, max_val, _, max_loc = cv2.minMaxLoc(res)
                 if np.isinf(max_val) or np.isnan(max_val): max_val = 0.0
                 
                 if max_val > max_score_found:
-                    # 移除绿色检查逻辑，直接更新分数
+                    # 如果开启了安全颜色检查，且分数达标，则进行反向查验
+                    if check_safe_color and max_val >= threshold:
+                        top_left = max_loc
+                        bottom_right = (top_left[0] + tmpl_w, top_left[1] + tmpl_h)
+                        # 切出原图(彩色)
+                        crop_img = screen_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
+                        
+                        # 如果是安全颜色(蓝/绿)，则忽略这次匹配
+                        if self._is_safe_color(crop_img):
+                            continue
+                            
                     max_score_found = max_val
 
             except Exception:
