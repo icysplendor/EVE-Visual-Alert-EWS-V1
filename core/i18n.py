@@ -1,6 +1,6 @@
 LANGUAGES = {
     "CN": {
-        "window_title": "EVE 视觉警报 (多开版)",
+        "window_title": "EVE 视觉警报", # 移除 (多开版)
         "btn_add": "+ 添加客户端组",
         "grp_thresh": "全局阈值设置",
         "btn_settings": "⚙ 详细设置",
@@ -8,13 +8,10 @@ LANGUAGES = {
         "btn_stop": "停止运行",
         "btn_debug": "实时画面",
         "btn_lang": "EN",
-        
-        # 新增的客户端内部按钮翻译
         "btn_local": "本地栏",
         "btn_overview": "总览栏",
         "btn_npc": "怪物栏",
         "btn_probe": "探针",
-        
         "log_ready": "系统就绪。请添加客户端并设置区域。",
         "log_start": ">>> 监控已启动",
         "log_stop": ">>> 监控已停止",
@@ -22,7 +19,7 @@ LANGUAGES = {
         "log_idle_alert": ">>> 提示: 程序处于待机状态"
     },
     "EN": {
-        "window_title": "EVE Visual Alert (Multibox)",
+        "window_title": "EVE Visual Alert", # Remove (Multibox)
         "btn_add": "+ ADD CLIENT GROUP",
         "grp_thresh": "Global Thresholds",
         "btn_settings": "⚙ SETTINGS",
@@ -30,13 +27,10 @@ LANGUAGES = {
         "btn_stop": "STOP",
         "btn_debug": "VIEW",
         "btn_lang": "CN",
-        
-        # 新增的客户端内部按钮翻译
         "btn_local": "LOCAL",
         "btn_overview": "OVERVIEW",
         "btn_npc": "RATS",
         "btn_probe": "PROBE",
-        
         "log_ready": "System Ready. Add clients to begin.",
         "log_start": ">>> Monitoring Engaged",
         "log_stop": ">>> Monitoring Halted",
