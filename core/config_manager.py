@@ -3,9 +3,9 @@ import os
 
 CONFIG_FILE = "config.json"
 
-# 默认只包含一个组
 DEFAULT_CONFIG = {
     "language": "CN",
+    "window_pos": [100, 100], # 新增：默认窗口位置
     "groups": [
         {
             "id": 0,
@@ -45,15 +45,13 @@ class ConfigManager:
             try:
                 with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                    # 简单的合并逻辑
                     for k, v in data.items():
-                        # 如果配置文件里是旧版的 regions 结构，强制升级为 groups
                         if k == "regions" and "groups" not in data:
-                            continue # 忽略旧版 regions，使用默认的 groups
+                            continue 
                         
                         if k in self.config:
                             if k == "groups":
-                                self.config[k] = v # 直接覆盖 groups
+                                self.config[k] = v 
                             elif isinstance(v, dict):
                                 for sub_k, sub_v in v.items():
                                     if sub_k in self.config[k]:
