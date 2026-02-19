@@ -14,7 +14,7 @@ class VisionEngine:
         self.last_screenshot_shape = "无"
         self.last_error = None
         
-        # 初始化 CLAHE
+        # 初始化 CLAHE (虽然现在不用了，但保留对象以防未来需要恢复)
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8,8))
         
         # === 颜色过滤器设置 ===
@@ -57,9 +57,7 @@ class VisionEngine:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
                 try:
-                    # === 关键修改：支持中文路径 ===
-                    # 原代码: img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-                    # 新代码: 使用 numpy 读取字节流，再解码
+                    # 使用 numpy 读取字节流，支持中文路径
                     img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
                     
                     if img is not None:
@@ -84,10 +82,21 @@ class VisionEngine:
         return cv2.LUT(image, table)
 
     def preprocess_image(self, gray_img):
+        """
+        统一的图像预处理流水线 (优化版)
+        """
+        # 1. Gamma 校正：压暗背景 (保留这个，对抗星空背景很有效)
         gamma_corrected = self.apply_gamma(gray_img, gamma=1.5)
+        
+        # 2. 简单的阈值截断 (保留这个，去除微弱噪点)
         _, thresholded = cv2.threshold(gamma_corrected, 30, 255, cv2.THRESH_TOZERO)
-        enhanced = self.clahe.apply(thresholded)
-        return enhanced
+        
+        # 3. [已移除] CLAHE 增强 
+        # 移除原因：CLAHE 是局部自适应的，会导致小模板和大截图在相同区域的像素值不一致，降低匹配度。
+        # enhanced = self.clahe.apply(thresholded)
+        
+        # 直接返回阈值处理后的图片
+        return thresholded
 
     def capture_screen(self, region, debug_name=None):
         self.last_error = None
