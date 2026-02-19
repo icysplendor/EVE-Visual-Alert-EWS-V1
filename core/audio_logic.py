@@ -37,7 +37,7 @@ class AlarmWorker(QObject):
                 self.vision.load_templates()
                 report = (
                     f"[{now_str}] System Check: Templates Loaded.\n"
-                    f"[{now_str}] Color Filter: Active (> {self.vision.GREEN_PIXEL_THRESHOLD}px)"
+                    f"[{now_str}] Logic: Standard Matching"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -54,28 +54,24 @@ class AlarmWorker(QObject):
                 client_name = grp["name"]
                 regions = grp["regions"]
                 
-                # 截图
                 img_local = self.vision.capture_screen(regions.get("local"))
                 img_overview = self.vision.capture_screen(regions.get("overview"))
                 img_monster = self.vision.capture_screen(regions.get("monster"))
                 img_probe = self.vision.capture_screen(regions.get("probe"))
 
-                # 匹配
-                def check(img, tmpls, th, color_check):
-                    _, score = self.vision.match_templates(img, tmpls, th, True, color_check)
+                # 匹配 (不再传递 color_check)
+                def check(img, tmpls, th):
+                    _, score = self.vision.match_templates(img, tmpls, th, True)
                     return score >= th, score
 
-                is_local, s_loc = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
-                is_overview, s_ovr = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
-                is_monster, s_mon = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
-                is_probe, s_prb = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
+                is_local, s_loc = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95))
+                is_overview, s_ovr = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95))
+                is_monster, s_mon = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95))
+                is_probe, s_prb = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95))
 
-                # 状态判定
                 has_threat = is_local or is_overview
-                
                 if is_probe: any_probe_triggered = True
 
-                # 声音优先级判定
                 if has_threat and is_monster: 
                     if major_sound != "mixed": major_sound = "mixed"
                 elif is_overview:
@@ -85,8 +81,6 @@ class AlarmWorker(QObject):
                 elif is_monster:
                     if major_sound is None: major_sound = "monster"
                 
-                # === 强制输出详细日志 ===
-                # 无论是否触发，都输出一行状态，让用户感觉到软件在工作
                 log_line = (
                     f"[{now_str}] [{client_name}] "
                     f"L:{s_loc:.2f} "
@@ -96,13 +90,9 @@ class AlarmWorker(QObject):
                 )
                 self.log_signal.emit(log_line)
 
-            # === 循环结束后的动作 ===
-            
-            # 1. 探针声音 (独立通道)
             if any_probe_triggered:
                 self.probe_signal.emit(True)
 
-            # 2. 主报警声音
             if major_sound:
                 alert_msg = f"[{now_str}] ⚠️ ALERT: {major_sound.upper()}"
                 self.log_signal.emit(alert_msg)
@@ -116,5 +106,4 @@ class AlarmWorker(QObject):
             elif any_probe_triggered:
                 time.sleep(2.0) 
             else:
-                # 正常扫描间隔，稍微快一点，0.5秒
                 time.sleep(0.5)
