@@ -2,9 +2,9 @@ import os
 import ctypes
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                              QPushButton, QLabel, QGroupBox, QDoubleSpinBox, 
-                             QTextEdit, QFrame, QGridLayout, QScrollArea)
+                             QTextEdit, QFrame, QGridLayout, QScrollArea, QApplication)
 from PyQt6.QtCore import QTimer, Qt, QUrl
-from PyQt6.QtGui import QIcon
+from PyQt6.QtGui import QIcon, QGuiApplication
 from PyQt6.QtMultimedia import QSoundEffect
 
 from core.config_manager import ConfigManager
@@ -14,7 +14,7 @@ from core.audio_logic import AlarmWorker
 from core.i18n import Translator
 from ui.components import GroupWidget, SettingsDialog, DebugWindow, resource_path, BTN_STYLE
 
-# 全局 CSS (基础部分，组件特定的已移至 components.py)
+# 全局 CSS
 GLOBAL_STYLE = """
 QMainWindow { background-color: #121212; }
 QWidget { font-family: "Segoe UI", "Microsoft YaHei", sans-serif; font-size: 11px; color: #cccccc; }
@@ -43,6 +43,36 @@ class MainWindow(QMainWindow):
         icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
+
+        # === 恢复窗口位置 ===
+        pos = self.cfg.get("window_pos")
+        if pos and len(pos) == 2:
+            x, y = pos
+            # 检查位置是否在当前屏幕范围内 (防止上次在副屏关闭后这次找不到)
+            screen_geo = QGuiApplication.primaryScreen().availableGeometry()
+            # 简单检查：只要左上角在主屏幕内，或者在虚拟桌面范围内
+            # 更稳妥的做法是遍历所有屏幕，这里做个简单兜底：如果坐标是负数且没有副屏，就重置
+            if x < 0 or y < 0:
+                # 检查所有屏幕
+                screens = QGuiApplication.screens()
+                is_visible = False
+                for screen in screens:
+                    if screen.geometry().contains(x, y):
+                        is_visible = True
+                        break
+                if not is_visible:
+                    x, y = 100, 100
+            
+            self.move(x, y)
+
+    def closeEvent(self, event):
+        # === 保存窗口位置 ===
+        pos = [self.x(), self.y()]
+        self.cfg.set("window_pos", pos)
+        
+        # 停止逻辑线程
+        self.logic.stop()
+        event.accept()
 
     def init_core(self):
         self.sounds = {} 
@@ -96,7 +126,7 @@ class MainWindow(QMainWindow):
         self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #fff; letter-spacing: 1px;")
         
         self.btn_lang = QPushButton("EN")
-        self.btn_lang.setFixedSize(30, 24) # 稍微加高一点，防止切断
+        self.btn_lang.setFixedSize(30, 24) 
         self.btn_lang.setStyleSheet(BTN_STYLE)
         self.btn_lang.clicked.connect(self.toggle_language)
         
@@ -123,7 +153,6 @@ class MainWindow(QMainWindow):
         # 3. 添加组按钮
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
         self.btn_add_group.setFixedHeight(36)
-        # 虚线边框风格
         self.btn_add_group.setStyleSheet("""
             QPushButton { border: 1px dashed #555; color: #888; background-color: #1a1a1a; border-radius: 4px; }
             QPushButton:hover { border-color: #00bcd4; color: #fff; }
@@ -169,7 +198,6 @@ class MainWindow(QMainWindow):
         self.btn_start = QPushButton("ENGAGE")
         self.btn_start.setObjectName("btn_start")
         self.btn_start.setFixedHeight(45)
-        # 启动按钮的特殊样式
         self.btn_start.setStyleSheet("""
             QPushButton { background-color: #1b3a2a; border: 1px solid #2e7d32; color: #4caf50; font-weight: bold; font-size: 13px; }
             QPushButton:checked { background-color: #3b1a1a; border: 1px solid #c62828; color: #ef5350; }
