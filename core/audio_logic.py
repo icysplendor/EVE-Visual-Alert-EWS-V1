@@ -37,7 +37,7 @@ class AlarmWorker(QObject):
                 self.vision.load_templates()
                 report = (
                     f"[{now_str}] System Check: Templates Loaded.\n"
-                    f"[{now_str}] Logic: Standard Matching"
+                    f"[{now_str}] Safe Color Filter: ON (Green/Blue > {self.vision.SAFE_COLOR_THRESHOLD}px)"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -59,15 +59,18 @@ class AlarmWorker(QObject):
                 img_monster = self.vision.capture_screen(regions.get("monster"))
                 img_probe = self.vision.capture_screen(regions.get("probe"))
 
-                # 匹配 (不再传递 color_check)
-                def check(img, tmpls, th):
-                    _, score = self.vision.match_templates(img, tmpls, th, True)
+                # 匹配 (传递 check_safe_color 参数)
+                def check(img, tmpls, th, safe_color):
+                    _, score = self.vision.match_templates(img, tmpls, th, True, check_safe_color=safe_color)
                     return score >= th, score
 
-                is_local, s_loc = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95))
-                is_overview, s_ovr = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95))
-                is_monster, s_mon = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95))
-                is_probe, s_prb = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95))
+                # Local 和 Overview 开启颜色保护 (友军过滤)
+                is_local, s_loc = check(img_local, self.vision.local_templates, thresholds.get("local", 0.95), True)
+                is_overview, s_ovr = check(img_overview, self.vision.overview_templates, thresholds.get("overview", 0.95), True)
+                
+                # Monster 和 Probe 不需要颜色保护
+                is_monster, s_mon = check(img_monster, self.vision.monster_templates, thresholds.get("monster", 0.95), False)
+                is_probe, s_prb = check(img_probe, self.vision.probe_templates, thresholds.get("probe", 0.95), False)
 
                 has_threat = is_local or is_overview
                 if is_probe: any_probe_triggered = True
