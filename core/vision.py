@@ -14,13 +14,10 @@ class VisionEngine:
         self.last_screenshot_shape = "无"
         self.last_error = None
         
-        # 初始化 CLAHE (虽然现在不用了，但保留对象以防未来需要恢复)
+        # 初始化 CLAHE (保留对象备用)
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8,8))
         
-        # === 颜色过滤器设置 ===
-        self.GREEN_LOWER = np.array([35, 40, 40])
-        self.GREEN_UPPER = np.array([85, 255, 255])
-        self.GREEN_PIXEL_THRESHOLD = 8 
+        # 移除绿色过滤器设置
             
         self.load_templates()
 
@@ -57,7 +54,6 @@ class VisionEngine:
             if filename.lower().endswith(('.png', '.jpg', '.bmp')):
                 path = os.path.join(folder, filename)
                 try:
-                    # 使用 numpy 读取字节流，支持中文路径
                     img = cv2.imdecode(np.fromfile(path, dtype=np.uint8), cv2.IMREAD_UNCHANGED)
                     
                     if img is not None:
@@ -82,20 +78,11 @@ class VisionEngine:
         return cv2.LUT(image, table)
 
     def preprocess_image(self, gray_img):
-        """
-        统一的图像预处理流水线 (优化版)
-        """
-        # 1. Gamma 校正：压暗背景 (保留这个，对抗星空背景很有效)
+        # 1. Gamma 校正
         gamma_corrected = self.apply_gamma(gray_img, gamma=1.5)
-        
-        # 2. 简单的阈值截断 (保留这个，去除微弱噪点)
+        # 2. 简单的阈值截断
         _, thresholded = cv2.threshold(gamma_corrected, 30, 255, cv2.THRESH_TOZERO)
-        
-        # 3. [已移除] CLAHE 增强 
-        # 移除原因：CLAHE 是局部自适应的，会导致小模板和大截图在相同区域的像素值不一致，降低匹配度。
-        # enhanced = self.clahe.apply(thresholded)
-        
-        # 直接返回阈值处理后的图片
+        # 3. 移除 CLAHE
         return thresholded
 
     def capture_screen(self, region, debug_name=None):
@@ -116,15 +103,10 @@ class VisionEngine:
             self.last_error = f"截图失败: {str(e)}"
             return None
 
-    def _is_green_region(self, img_crop):
-        if img_crop is None or img_crop.size == 0:
-            return False
-        hsv = cv2.cvtColor(img_crop, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self.GREEN_LOWER, self.GREEN_UPPER)
-        green_pixel_count = cv2.countNonZero(mask)
-        return green_pixel_count > self.GREEN_PIXEL_THRESHOLD
+    # 移除 _is_green_region 函数
 
-    def match_templates(self, screen_img, template_list, threshold, return_max_val=False, check_green_exclusion=False):
+    def match_templates(self, screen_img, template_list, threshold, return_max_val=False):
+        # 移除 check_green_exclusion 参数
         if screen_img is None:
             err = self.last_error if self.last_error else "未获取到截图"
             return (err, 0.0) if return_max_val else False
@@ -151,16 +133,11 @@ class VisionEngine:
                 else:
                     res = cv2.matchTemplate(screen_processed, tmpl_processed, cv2.TM_CCOEFF_NORMED)
                 
-                _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                _, max_val, _, _ = cv2.minMaxLoc(res)
                 if np.isinf(max_val) or np.isnan(max_val): max_val = 0.0
                 
                 if max_val > max_score_found:
-                    if check_green_exclusion and max_val >= threshold:
-                        top_left = max_loc
-                        bottom_right = (top_left[0] + tmpl_w, top_left[1] + tmpl_h)
-                        crop_img = screen_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
-                        if self._is_green_region(crop_img):
-                            continue
+                    # 移除绿色检查逻辑，直接更新分数
                     max_score_found = max_val
 
             except Exception:
