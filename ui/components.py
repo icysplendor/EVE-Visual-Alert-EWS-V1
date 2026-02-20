@@ -1,11 +1,10 @@
 import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QGroupBox, QGridLayout, QLineEdit, 
-                             QFileDialog, QMessageBox, QWidget)
+                             QFileDialog, QMessageBox, QWidget, QDoubleSpinBox)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 
-# EVE 风格的按钮样式，强制应用到 GroupWidget 内部
 BTN_STYLE = """
 QPushButton {
     background-color: #333;
@@ -41,23 +40,57 @@ class SettingsDialog(QDialog):
         self.cfg = cfg
         self.setWindowTitle("Advanced Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.resize(450, 350)
+        self.resize(450, 450) # 稍微加高一点
         
         icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setup_ui()
-        # 保持深色背景
         self.setStyleSheet("background-color: #121212; color: #ccc;")
 
     def setup_ui(self):
         layout = QVBoxLayout(self)
+        layout.setSpacing(15) # 增加间距
         
+        # 通用 GroupBox 样式 (修复标题显示不全：增加 padding-top)
+        gb_style = """
+        QGroupBox { 
+            border: 1px solid #444; 
+            margin-top: 15px; 
+            padding-top: 15px; 
+            font-weight: bold; 
+            color: #00bcd4; 
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top left;
+            left: 10px;
+            padding: 0 5px;
+        }
+        """
+
+        # 1. 延迟设置 (新增)
+        grp_gen = QGroupBox("General Settings")
+        grp_gen.setStyleSheet(gb_style)
+        l_gen = QHBoxLayout()
+        
+        lbl_jitter = QLabel("Anti-Jitter Delay (sec):")
+        self.spin_jitter = QDoubleSpinBox()
+        self.spin_jitter.setRange(0.01, 1.0)
+        self.spin_jitter.setSingleStep(0.01)
+        self.spin_jitter.setValue(self.cfg.get("jitter_delay"))
+        self.spin_jitter.setStyleSheet("background-color: #080808; border: 1px solid #333; color: #00bcd4; padding: 4px;")
+        self.spin_jitter.valueChanged.connect(lambda v: self.cfg.set("jitter_delay", v))
+        
+        l_gen.addWidget(lbl_jitter)
+        l_gen.addWidget(self.spin_jitter)
+        grp_gen.setLayout(l_gen)
+        layout.addWidget(grp_gen)
+
+        # 2. Webhook
         grp_wh = QGroupBox("Webhook Configuration")
-        # 局部样式修正
-        grp_wh.setStyleSheet("QGroupBox { border: 1px solid #444; margin-top: 10px; font-weight: bold; color: #00bcd4; }")
-        
+        grp_wh.setStyleSheet(gb_style)
         l_wh = QVBoxLayout()
         self.line_webhook = QLineEdit(self.cfg.get("webhook_url"))
         self.line_webhook.setPlaceholderText("https://discord.com/api/webhooks/...")
@@ -67,9 +100,9 @@ class SettingsDialog(QDialog):
         grp_wh.setLayout(l_wh)
         layout.addWidget(grp_wh)
 
+        # 3. Audio
         grp_audio = QGroupBox("Audio Assets")
-        grp_audio.setStyleSheet("QGroupBox { border: 1px solid #444; margin-top: 10px; font-weight: bold; color: #00bcd4; }")
-        
+        grp_audio.setStyleSheet(gb_style)
         grid_audio = QGridLayout()
         grid_audio.setSpacing(10)
         
@@ -93,7 +126,6 @@ class SettingsDialog(QDialog):
             
             btn_sel = QPushButton("SELECT")
             btn_sel.setFixedSize(60, 24)
-            # 应用按钮样式
             btn_sel.setStyleSheet(BTN_STYLE)
             btn_sel.clicked.connect(lambda _, k=key, l=lbl_file: self.select_audio(k, l))
             
@@ -128,7 +160,7 @@ class SettingsDialog(QDialog):
             self.cfg.set("audio_paths", paths)
             label_widget.setText(os.path.basename(fname))
 
-# === 单个监控组控件 ===
+# === 单个监控组控件 (布局优化) ===
 class GroupWidget(QGroupBox):
     def __init__(self, group_data, index, parent_win):
         super().__init__()
@@ -136,8 +168,7 @@ class GroupWidget(QGroupBox):
         self.index = index
         self.parent_win = parent_win
         
-        self.setTitle(f"CLIENT {index + 1}")
-        # 强制设置 GroupBox 样式
+        # 不直接设置 setTitle，而是用自定义布局来包含标题和删除按钮
         self.setStyleSheet("""
             QGroupBox { 
                 border: 1px solid #444; 
@@ -147,52 +178,59 @@ class GroupWidget(QGroupBox):
                 color: #00bcd4; 
                 background-color: #1a1a1a;
             }
-            QGroupBox::title { 
-                subcontrol-origin: margin; 
-                subcontrol-position: top left; 
-                padding: 0 5px; 
-                left: 10px; 
-                background-color: #1a1a1a; 
-            }
         """)
         self.setup_ui()
 
     def setup_ui(self):
-        layout = QGridLayout(self)
-        layout.setContentsMargins(10, 15, 10, 10)
-        layout.setSpacing(8)
+        # 主垂直布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(5, 5, 5, 5)
+        main_layout.setSpacing(5)
 
-        # 4个功能按钮
-        self.btn_local = QPushButton()
-        self.btn_overview = QPushButton()
-        self.btn_monster = QPushButton()
-        self.btn_probe = QPushButton()
+        # 1. 顶部栏：标题 + 删除按钮
+        top_bar = QHBoxLayout()
         
-        # 应用强制样式，确保它们看起来像按钮
-        for btn in [self.btn_local, self.btn_overview, self.btn_monster, self.btn_probe]:
-            btn.setStyleSheet(BTN_STYLE)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        lbl_title = QLabel(f"CLIENT {self.index + 1}")
+        lbl_title.setStyleSheet("font-weight: bold; color: #00bcd4; font-size: 12px;")
+        top_bar.addWidget(lbl_title)
+        top_bar.addStretch()
         
         # 删除按钮
         self.btn_remove = QPushButton("✖")
-        self.btn_remove.setObjectName("btn_remove")
         self.btn_remove.setFixedSize(24, 24)
         self.btn_remove.setToolTip("Remove Group")
-        # 删除按钮保持无边框风格，但悬停变红
         self.btn_remove.setStyleSheet("""
             QPushButton { background: transparent; border: none; color: #666; font-size: 14px; }
             QPushButton:hover { color: #ff5555; background: #2a0000; }
         """)
         self.btn_remove.clicked.connect(self.request_remove)
-
+        
         if self.index == 0:
             self.btn_remove.setVisible(False)
+            
+        top_bar.addWidget(self.btn_remove)
+        main_layout.addLayout(top_bar)
 
-        layout.addWidget(self.btn_local, 0, 0)
-        layout.addWidget(self.btn_overview, 0, 1)
-        layout.addWidget(self.btn_monster, 1, 0)
-        layout.addWidget(self.btn_probe, 1, 1)
-        layout.addWidget(self.btn_remove, 0, 2) 
+        # 2. 按钮区域 (2x2 Grid)
+        btn_grid = QGridLayout()
+        btn_grid.setSpacing(8)
+
+        self.btn_local = QPushButton()
+        self.btn_overview = QPushButton()
+        self.btn_monster = QPushButton()
+        self.btn_probe = QPushButton()
+        
+        for btn in [self.btn_local, self.btn_overview, self.btn_monster, self.btn_probe]:
+            btn.setStyleSheet(BTN_STYLE)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(28) # 固定高度，保证所有 Client 一致
+
+        btn_grid.addWidget(self.btn_local, 0, 0)
+        btn_grid.addWidget(self.btn_overview, 0, 1)
+        btn_grid.addWidget(self.btn_monster, 1, 0)
+        btn_grid.addWidget(self.btn_probe, 1, 1)
+        
+        main_layout.addLayout(btn_grid)
 
         self.btn_local.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "local"))
         self.btn_overview.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "overview"))
@@ -214,8 +252,6 @@ class GroupWidget(QGroupBox):
         msg_box.setText(f"Are you sure you want to remove Client {self.index + 1}?")
         msg_box.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         msg_box.setDefaultButton(QMessageBox.StandardButton.No)
-        
-        # 强制设置 QMessageBox 样式
         msg_box.setStyleSheet("background-color: #121212; color: #ccc; QPushButton { background: #333; color: #eee; border: 1px solid #555; padding: 5px; min-width: 60px; }")
         
         reply = msg_box.exec()
@@ -233,7 +269,7 @@ class DebugWindow(QDialog):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setStyleSheet("background-color: #121212; color: #ccc;")
-        self.resize(600, 500)
+        self.resize(650, 500)
         
         self.current_group_idx = 0
         self.group_buttons = []
@@ -279,9 +315,8 @@ class DebugWindow(QDialog):
         for i in range(num_groups):
             btn = QPushButton(f"CLIENT {i+1}")
             btn.setCheckable(True)
-            btn.setFixedHeight(30)
+            btn.setFixedSize(80, 30) # 增加宽度
             btn.clicked.connect(lambda _, idx=i: self.switch_group(idx))
-            # 标签页按钮样式
             btn.setStyleSheet("""
                 QPushButton { background: #222; border: 1px solid #444; color: #888; border-bottom: none; }
                 QPushButton:checked { background: #00bcd4; color: #000; border: 1px solid #00bcd4; font-weight: bold; }
