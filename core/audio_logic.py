@@ -157,7 +157,7 @@ class AlarmWorker(QObject):
                 # === 关键优化 ===
                 # 发现了疑似威胁（闪电标记），休眠 0.1 秒
                 # 既保证了画面刷新，又保证了极速响应
-                time.sleep(0.1)
+                time.sleep(0.18)
                 
             else:
                 # 全程无事，正常休眠省资源
