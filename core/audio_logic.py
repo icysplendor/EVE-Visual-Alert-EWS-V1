@@ -15,14 +15,28 @@ class AlarmWorker(QObject):
         self.running = False
         self.thread = None
         self.first_run = True 
+        
         self.threat_persistence = {}
         self.CONFIRM_CYCLES = 2 
+        
+        # === 新增：非阻塞冷却记录 ===
+        self.last_alert_time = 0.0
+        self.last_alert_type = None
+        self.last_probe_time = 0.0
+        
+        # 同一种报警的重复间隔 (秒)
+        self.REPEAT_INTERVAL = 2.0 
 
     def start(self):
         if not self.running:
             self.running = True
             self.first_run = True 
             self.threat_persistence = {}
+            # 重置状态
+            self.last_alert_time = 0.0
+            self.last_alert_type = None
+            self.last_probe_time = 0.0
+            
             self.thread = threading.Thread(target=self._loop, daemon=True)
             self.thread.start()
 
@@ -33,10 +47,11 @@ class AlarmWorker(QObject):
 
     def _loop(self):
         while self.running:
+            # 记录当前循环开始时间，用于非阻塞计时
+            loop_start_time = time.time()
             now = datetime.now()
             now_str = now.strftime("%H:%M:%S")
             
-            # 读取配置中的延迟时间，默认为 0.18
             jitter_delay = self.cfg.get("jitter_delay")
             if jitter_delay is None: jitter_delay = 0.18
             
@@ -44,7 +59,7 @@ class AlarmWorker(QObject):
                 self.vision.load_templates()
                 report = (
                     f"[{now_str}] System Check: Templates Loaded.\n"
-                    f"[{now_str}] Mode: Fast-Confirm ({jitter_delay}s Interval)"
+                    f"[{now_str}] Logic: Non-Blocking High Frequency ({jitter_delay}s)"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -57,6 +72,7 @@ class AlarmWorker(QObject):
             major_sound = None
             pending_threat_detected = False
 
+            # === 逐个客户端检测 ===
             for i, grp in enumerate(groups):
                 client_name = grp["name"]
                 regions = grp["regions"]
@@ -123,26 +139,49 @@ class AlarmWorker(QObject):
                 )
                 self.log_signal.emit(log_line)
 
+            # === 循环结束后的动作 (非阻塞逻辑) ===
+            
+            # 1. 探针处理
             if any_probe_triggered:
-                self.probe_signal.emit(True)
+                # 检查探针冷却 (2秒)
+                if loop_start_time - self.last_probe_time > 2.0:
+                    self.probe_signal.emit(True)
+                    self.last_probe_time = loop_start_time
 
+            # 2. 主报警处理
             if major_sound:
-                alert_msg = f"[{now_str}] ⚠️ ALERT: {major_sound.upper()}"
-                self.log_signal.emit(alert_msg)
+                should_play = False
                 
-                webhook = self.cfg.get("webhook_url")
-                if webhook:
-                    try:
-                        threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
-                    except: pass
-                time.sleep(2.0) 
+                # 情况 A: 威胁升级/变更 (例如从 Local 变成 Mixed) -> 立即报警
+                if major_sound != self.last_alert_type:
+                    should_play = True
+                    
+                # 情况 B: 威胁相同，但冷却时间已过 -> 重复报警
+                elif (loop_start_time - self.last_alert_time) > self.REPEAT_INTERVAL:
+                    should_play = True
                 
-            elif any_probe_triggered:
-                time.sleep(2.0)
-                
-            elif pending_threat_detected:
-                # 使用配置中的延迟
-                time.sleep(jitter_delay)
-                
+                if should_play:
+                    alert_msg = f"[{now_str}] ⚠️ ALERT: {major_sound.upper()}"
+                    self.log_signal.emit(alert_msg)
+                    
+                    # 更新状态
+                    self.last_alert_time = loop_start_time
+                    self.last_alert_type = major_sound
+                    
+                    webhook = self.cfg.get("webhook_url")
+                    if webhook:
+                        try:
+                            threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
+                        except: pass
             else:
+                # 如果没有威胁，重置类型，这样下次有威胁时会视为“新类型”立即报警
+                self.last_alert_type = None
+
+            # === 睡眠控制 (关键优化) ===
+            # 只要有任何 确认的威胁(major_sound) 或者 疑似的威胁(pending)
+            # 都使用极速模式 (jitter_delay)，不再进行长休眠
+            if major_sound or pending_threat_detected:
+                time.sleep(jitter_delay)
+            else:
+                # 只有在完全安全、没有任何红点或闪电时，才慢下来
                 time.sleep(0.5)
