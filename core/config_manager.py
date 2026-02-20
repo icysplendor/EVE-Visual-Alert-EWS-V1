@@ -5,7 +5,8 @@ CONFIG_FILE = "config.json"
 
 DEFAULT_CONFIG = {
     "language": "CN",
-    "window_pos": [100, 100], # 新增：默认窗口位置
+    "window_pos": [100, 100],
+    "jitter_delay": 0.18, # 新增：防抖延迟时间 (秒)
     "groups": [
         {
             "id": 0,
@@ -60,6 +61,11 @@ class ConfigManager:
                                          self.config[k][sub_k] = DEFAULT_CONFIG[k].get(sub_k)
                             else:
                                 self.config[k] = v
+                    
+                    # 确保新增字段存在
+                    if "jitter_delay" not in self.config:
+                        self.config["jitter_delay"] = 0.18
+
             except:
                 print("加载配置文件失败，使用默认配置")
 
