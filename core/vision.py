@@ -11,7 +11,7 @@ class VisionEngine:
             "overview": {},
             "monster": {},
             "probe": {},
-            "scaling": {} # 专门用于缩放匹配的库
+            "scaling": {} 
         }
         
         self.SCALES = ["90", "100", "125"]
@@ -34,7 +34,6 @@ class VisionEngine:
         base_dir = os.getcwd()
         assets_dir = os.path.join(base_dir, "assets")
         
-        # 映射配置：类型 -> 文件夹名
         folder_map = {
             "local": "hostile_icons_local",
             "overview": "hostile_icons_overview",
@@ -47,7 +46,6 @@ class VisionEngine:
         
         for type_key, folder_name in folder_map.items():
             for scale in self.SCALES:
-                # 路径结构: assets/hostile_icons_local/100/
                 path = os.path.join(assets_dir, folder_name, scale)
                 imgs = self._load_images_from_folder(path)
                 self.templates[type_key][scale] = imgs
@@ -123,9 +121,6 @@ class VisionEngine:
         return (green_count > self.SAFE_COLOR_THRESHOLD) or (blue_count > self.SAFE_COLOR_THRESHOLD)
 
     def detect_scale(self, screen_img, threshold=0.85):
-        """
-        尝试匹配不同缩放比例的图标，返回匹配度最高的 Scale 字符串
-        """
         if screen_img is None: return None
 
         best_scale = None
@@ -133,7 +128,6 @@ class VisionEngine:
 
         for scale in self.SCALES:
             tmpls = self.templates["scaling"].get(scale, [])
-            # 使用 match_templates 获取最高分，不检查颜色
             _, score = self.match_templates(screen_img, tmpls, threshold, return_max_val=True, check_safe_color=False)
             
             if score > best_score and score >= threshold:
@@ -146,6 +140,7 @@ class VisionEngine:
         """
         统计匹配数量
         返回: (count, max_score)
+        注意：max_score 现在只反映【未被颜色过滤】的有效目标的最高分
         """
         if screen_img is None or not template_list:
             return 0, 0.0
@@ -156,8 +151,6 @@ class VisionEngine:
         total_count = 0
         global_max_score = 0.0
         
-        # 为了避免同一个物体被不同模板重复匹配，我们需要一个 mask 来标记已匹配区域
-        # 0 = 未匹配, 255 = 已匹配
         mask_map = np.zeros(screen_processed.shape, dtype=np.uint8)
 
         for tmpl_processed, mask in template_list:
@@ -171,23 +164,16 @@ class VisionEngine:
                 else:
                     res = cv2.matchTemplate(screen_processed, tmpl_processed, cv2.TM_CCOEFF_NORMED)
                 
-                # 迭代寻找所有大于阈值的点
                 while True:
                     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
                     
-                    if max_val > global_max_score:
-                        global_max_score = max_val
-
                     if max_val >= threshold:
-                        # 检查这个位置是否已经被标记过 (防止重叠计数)
                         top_left = max_loc
                         bottom_right = (top_left[0] + tmpl_w, top_left[1] + tmpl_h)
                         
-                        # 检查 mask_map 中心点是否已被占用
                         center_x = int(top_left[0] + tmpl_w/2)
                         center_y = int(top_left[1] + tmpl_h/2)
                         
-                        # 简单的防重叠：检查中心点是否为0
                         if mask_map[center_y, center_x] == 0:
                             # 颜色检查
                             is_safe = False
@@ -196,22 +182,22 @@ class VisionEngine:
                                 if self._is_safe_color(crop_img):
                                     is_safe = True
                             
+                            # === 关键修改：只有不是友军时，才记录分数和数量 ===
                             if not is_safe:
                                 total_count += 1
-                                # 标记 mask_map
+                                if max_val > global_max_score:
+                                    global_max_score = max_val
+                                    
                                 cv2.rectangle(mask_map, top_left, bottom_right, 255, -1)
                         
-                        # 无论是否计数，都要在结果图上抹去这一块，防止死循环
-                        # 抹去 result map 中的这一块区域 (设为 -1)
                         cv2.rectangle(res, top_left, bottom_right, -1.0, -1)
                     else:
-                        break # 当前模板没更多匹配了
+                        break 
             except Exception:
                 continue
 
         return total_count, global_max_score
 
-    # 保留旧接口用于兼容 (虽然 audio_logic 会改用 count_matches)
     def match_templates(self, screen_img, template_list, threshold, return_max_val=False, check_safe_color=False):
         count, score = self.count_matches(screen_img, template_list, threshold, check_safe_color)
         if return_max_val:
