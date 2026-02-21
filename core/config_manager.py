@@ -6,12 +6,13 @@ CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "language": "CN",
     "window_pos": [100, 100],
-    "jitter_delay": 0.18, # 防抖延迟 (秒)
-    "scan_interval": 0.5, # 新增：常规检测间隔 (秒)
+    "jitter_delay": 0.18,
+    "scan_interval": 0.5,
     "groups": [
         {
             "id": 0,
             "name": "Client 1",
+            "scale": None, # 新增：存储该客户端的缩放比例 (字符串 "90", "100", "125")
             "regions": {
                 "local": None,
                 "overview": None,
@@ -63,7 +64,6 @@ class ConfigManager:
                             else:
                                 self.config[k] = v
                     
-                    # 确保新增字段存在
                     if "jitter_delay" not in self.config:
                         self.config["jitter_delay"] = 0.18
                     if "scan_interval" not in self.config:
