@@ -55,14 +55,14 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-# === 设置窗口 (包含滑块) ===
+# === 设置窗口 ===
 class SettingsDialog(QDialog):
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
         self.cfg = cfg
         self.setWindowTitle("Advanced Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.resize(500, 600) # 增加高度以容纳更多内容
+        self.resize(500, 650)
         
         icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
@@ -72,7 +72,6 @@ class SettingsDialog(QDialog):
         self.setStyleSheet("background-color: #121212; color: #ccc;")
 
     def setup_ui(self):
-        # 使用 ScrollArea 防止内容过多显示不全
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0,0,0,0)
         
@@ -101,51 +100,65 @@ class SettingsDialog(QDialog):
         }
         """
 
+        # === 核心逻辑：步进滑块生成器 ===
+        def create_stepped_slider(label_text, real_min, real_max, step_size, current_real_val, callback, val_fmt):
+            # 计算总步数
+            total_steps = int((real_max - real_min) / step_size)
+            
+            # 计算当前滑块位置 (0 到 total_steps)
+            current_slider_pos = int((current_real_val - real_min) / step_size)
+            # 边界保护
+            current_slider_pos = max(0, min(total_steps, current_slider_pos))
+
+            lbl = QLabel(label_text)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(0, total_steps) # 设置范围为步数
+            slider.setSingleStep(1)
+            slider.setPageStep(1)
+            slider.setValue(current_slider_pos)
+            slider.setTickPosition(QSlider.TickPosition.TicksBelow)
+            slider.setTickInterval(1) # 显示每一格的刻度
+            slider.setStyleSheet(SLIDER_STYLE)
+            
+            val_lbl = QLabel(val_fmt(current_real_val))
+            val_lbl.setFixedWidth(60)
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val_lbl.setStyleSheet("color: #00bcd4; font-weight: bold;")
+            
+            def on_change(pos):
+                # 将滑块位置(0..N) 转换回 真实数值
+                real_val = real_min + (pos * step_size)
+                # 修正浮点数精度问题
+                real_val = round(real_val, 5)
+                val_lbl.setText(val_fmt(real_val))
+                callback(real_val)
+
+            slider.valueChanged.connect(on_change)
+            return lbl, slider, val_lbl
+
         # 1. 扫描与延迟设置
         grp_logic = QGroupBox("Logic Configuration")
         grp_logic.setStyleSheet(gb_style)
         l_logic = QGridLayout()
         l_logic.setSpacing(10)
         
-        # 辅助函数：创建滑块行
-        def create_slider_row(label_text, min_val, max_val, step, current_val, callback, val_fmt):
-            lbl = QLabel(label_text)
-            slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(min_val, max_val)
-            slider.setSingleStep(step)
-            slider.setPageStep(step)
-            slider.setValue(current_val)
-            slider.setStyleSheet(SLIDER_STYLE)
-            
-            val_lbl = QLabel(val_fmt(current_val))
-            val_lbl.setFixedWidth(50)
-            val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            val_lbl.setStyleSheet("color: #00bcd4; font-weight: bold;")
-            
-            # 连接信号
-            slider.valueChanged.connect(lambda v: val_lbl.setText(val_fmt(v)))
-            slider.valueChanged.connect(lambda v: callback(v))
-            
-            return lbl, slider, val_lbl
-
-        # -> Scan Interval (200-1200ms, step 50)
-        # Config存的是秒(0.5)，滑块用毫秒(500)
-        curr_scan = int(self.cfg.get("scan_interval") * 1000)
-        l1, s1, v1 = create_slider_row(
+        # -> Scan Interval: 200ms - 1200ms, Step 50ms
+        curr_scan = self.cfg.get("scan_interval") * 1000
+        l1, s1, v1 = create_stepped_slider(
             "Scan Interval (Safe):", 200, 1200, 50, curr_scan,
             lambda v: self.cfg.set("scan_interval", v / 1000.0),
-            lambda v: f"{v}ms"
+            lambda v: f"{int(v)}ms"
         )
         l_logic.addWidget(l1, 0, 0)
         l_logic.addWidget(s1, 0, 1)
         l_logic.addWidget(v1, 0, 2)
 
-        # -> Jitter Delay (100-300ms, step 10)
-        curr_jitter = int(self.cfg.get("jitter_delay") * 1000)
-        l2, s2, v2 = create_slider_row(
+        # -> Jitter Delay: 100ms - 300ms, Step 10ms
+        curr_jitter = self.cfg.get("jitter_delay") * 1000
+        l2, s2, v2 = create_stepped_slider(
             "Anti-Jitter Delay:", 100, 300, 10, curr_jitter,
             lambda v: self.cfg.set("jitter_delay", v / 1000.0),
-            lambda v: f"{v}ms"
+            lambda v: f"{int(v)}ms"
         )
         l_logic.addWidget(l2, 1, 0)
         l_logic.addWidget(s2, 1, 1)
@@ -154,7 +167,7 @@ class SettingsDialog(QDialog):
         grp_logic.setLayout(l_logic)
         layout.addWidget(grp_logic)
 
-        # 2. 全局阈值设置 (移到这里)
+        # 2. 全局阈值设置
         grp_th = QGroupBox("Global Thresholds")
         grp_th.setStyleSheet(gb_style)
         l_th = QGridLayout()
@@ -162,19 +175,19 @@ class SettingsDialog(QDialog):
         
         thresholds = self.cfg.get("thresholds")
         
-        # 阈值滑块生成器 (0.80 - 0.95, step 0.005 -> 映射为 800 - 950, step 5)
+        # 阈值: 0.800 - 0.995, Step 0.005
         def add_thresh_slider(row, key, label):
-            curr_val = int(thresholds.get(key, 0.95) * 1000)
+            curr_val = thresholds.get(key, 0.95)
             
             def update_cfg(val):
                 t = self.cfg.get("thresholds")
-                t[key] = val / 1000.0
+                t[key] = val
                 self.cfg.set("thresholds", t)
 
-            l, s, v = create_slider_row(
-                label, 800, 950, 5, curr_val,
+            l, s, v = create_stepped_slider(
+                label, 0.800, 0.995, 0.005, curr_val,
                 update_cfg,
-                lambda val: f"{val/1000.0:.3f}"
+                lambda val: f"{val*100.0:.1f}%"
             )
             l_th.addWidget(l, row, 0)
             l_th.addWidget(s, row, 1)
