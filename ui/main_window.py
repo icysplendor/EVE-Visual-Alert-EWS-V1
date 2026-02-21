@@ -44,16 +44,10 @@ class MainWindow(QMainWindow):
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        # === 恢复窗口位置 ===
         pos = self.cfg.get("window_pos")
         if pos and len(pos) == 2:
             x, y = pos
-            # 检查位置是否在当前屏幕范围内 (防止上次在副屏关闭后这次找不到)
-            screen_geo = QGuiApplication.primaryScreen().availableGeometry()
-            # 简单检查：只要左上角在主屏幕内，或者在虚拟桌面范围内
-            # 更稳妥的做法是遍历所有屏幕，这里做个简单兜底：如果坐标是负数且没有副屏，就重置
             if x < 0 or y < 0:
-                # 检查所有屏幕
                 screens = QGuiApplication.screens()
                 is_visible = False
                 for screen in screens:
@@ -62,15 +56,11 @@ class MainWindow(QMainWindow):
                         break
                 if not is_visible:
                     x, y = 100, 100
-            
             self.move(x, y)
 
     def closeEvent(self, event):
-        # === 保存窗口位置 ===
         pos = [self.x(), self.y()]
         self.cfg.set("window_pos", pos)
-        
-        # 停止逻辑线程
         self.logic.stop()
         event.accept()
 
@@ -114,7 +104,7 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         self.central = QWidget()
         self.setCentralWidget(self.central)
-        self.resize(400, 720)
+        self.resize(400, 600) # 高度可以稍微减小，因为移除了阈值区
         
         main_layout = QVBoxLayout(self.central)
         main_layout.setSpacing(10)
@@ -138,6 +128,7 @@ class MainWindow(QMainWindow):
         # 2. 监控组列表 (Scroll Area)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
+        self.scroll.setStyleSheet("background-color: #121212; border: none;")
         
         self.scroll_content = QWidget()
         self.scroll_content.setStyleSheet("background-color: #121212;") 
@@ -160,34 +151,7 @@ class MainWindow(QMainWindow):
         self.btn_add_group.clicked.connect(self.add_group)
         main_layout.addWidget(self.btn_add_group)
 
-        # 4. 全局阈值
-        self.grp_thresh = QGroupBox("GLOBAL THRESHOLDS")
-        self.grp_thresh.setStyleSheet("QGroupBox { border: 1px solid #444; margin-top: 10px; font-weight: bold; color: #00bcd4; background: #1a1a1a; } QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 5px; }")
-        
-        grid_th = QGridLayout()
-        grid_th.setContentsMargins(10, 15, 10, 10)
-        
-        def mk_th(label, key, r, c):
-            lbl = QLabel(label)
-            lbl.setStyleSheet("color: #aaa;")
-            sp = QDoubleSpinBox()
-            sp.setRange(0.1, 1.0)
-            sp.setSingleStep(0.01)
-            sp.setValue(self.cfg.get("thresholds").get(key, 0.95))
-            sp.valueChanged.connect(lambda v: self.update_cfg("thresholds", key, v))
-            grid_th.addWidget(lbl, r, c*2)
-            grid_th.addWidget(sp, r, c*2+1)
-            return lbl
-            
-        mk_th("LOC %", "local", 0, 0)
-        mk_th("OVR %", "overview", 0, 1)
-        mk_th("RAT %", "monster", 1, 0)
-        mk_th("PRB %", "probe", 1, 1)
-        
-        self.grp_thresh.setLayout(grid_th)
-        main_layout.addWidget(self.grp_thresh)
-
-        # 5. 底部控制栏
+        # 4. 底部控制栏
         bot = QHBoxLayout()
         
         self.btn_settings = QPushButton("⚙ CONFIG")
@@ -216,7 +180,7 @@ class MainWindow(QMainWindow):
         bot.addWidget(self.btn_debug)
         main_layout.addLayout(bot)
 
-        # 6. 日志
+        # 5. 日志
         self.txt_log = QTextEdit()
         self.txt_log.setFixedHeight(100)
         self.txt_log.setReadOnly(True)
@@ -297,7 +261,6 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(_("window_title"))
         self.lbl_title.setText(_("window_title"))
         self.btn_add_group.setText(_("btn_add"))
-        self.grp_thresh.setTitle(_("grp_thresh"))
         
         if not self.logic.running:
             self.btn_start.setText(_("btn_start"))
