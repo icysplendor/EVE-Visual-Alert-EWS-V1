@@ -1,7 +1,7 @@
 import os
 from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton, 
                              QLabel, QGroupBox, QGridLayout, QLineEdit, 
-                             QFileDialog, QMessageBox, QWidget, QDoubleSpinBox)
+                             QFileDialog, QMessageBox, QWidget, QSlider, QScrollArea)
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QPixmap, QImage, QIcon
 
@@ -25,6 +25,28 @@ QPushButton:pressed {
 }
 """
 
+SLIDER_STYLE = """
+QSlider::groove:horizontal {
+    border: 1px solid #333;
+    height: 6px;
+    background: #111;
+    margin: 2px 0;
+    border-radius: 3px;
+}
+QSlider::handle:horizontal {
+    background: #00bcd4;
+    border: 1px solid #00bcd4;
+    width: 14px;
+    height: 14px;
+    margin: -5px 0;
+    border-radius: 7px;
+}
+QSlider::sub-page:horizontal {
+    background: #008ba3;
+    border-radius: 3px;
+}
+"""
+
 def resource_path(relative_path):
     import sys
     try:
@@ -33,14 +55,14 @@ def resource_path(relative_path):
         base_path = os.path.abspath(".")
     return os.path.join(base_path, relative_path)
 
-# === 设置窗口 ===
+# === 设置窗口 (包含滑块) ===
 class SettingsDialog(QDialog):
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
         self.cfg = cfg
         self.setWindowTitle("Advanced Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.resize(450, 450) # 稍微加高一点
+        self.resize(500, 600) # 增加高度以容纳更多内容
         
         icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
@@ -50,10 +72,19 @@ class SettingsDialog(QDialog):
         self.setStyleSheet("background-color: #121212; color: #ccc;")
 
     def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setSpacing(15) # 增加间距
+        # 使用 ScrollArea 防止内容过多显示不全
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0,0,0,0)
         
-        # 通用 GroupBox 样式 (修复标题显示不全：增加 padding-top)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("background-color: #121212; border: none;")
+        
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(15, 15, 15, 15)
+        
         gb_style = """
         QGroupBox { 
             border: 1px solid #444; 
@@ -70,25 +101,94 @@ class SettingsDialog(QDialog):
         }
         """
 
-        # 1. 延迟设置 (新增)
-        grp_gen = QGroupBox("General Settings")
-        grp_gen.setStyleSheet(gb_style)
-        l_gen = QHBoxLayout()
+        # 1. 扫描与延迟设置
+        grp_logic = QGroupBox("Logic Configuration")
+        grp_logic.setStyleSheet(gb_style)
+        l_logic = QGridLayout()
+        l_logic.setSpacing(10)
         
-        lbl_jitter = QLabel("Anti-Jitter Delay (sec):")
-        self.spin_jitter = QDoubleSpinBox()
-        self.spin_jitter.setRange(0.01, 1.0)
-        self.spin_jitter.setSingleStep(0.01)
-        self.spin_jitter.setValue(self.cfg.get("jitter_delay"))
-        self.spin_jitter.setStyleSheet("background-color: #080808; border: 1px solid #333; color: #00bcd4; padding: 4px;")
-        self.spin_jitter.valueChanged.connect(lambda v: self.cfg.set("jitter_delay", v))
-        
-        l_gen.addWidget(lbl_jitter)
-        l_gen.addWidget(self.spin_jitter)
-        grp_gen.setLayout(l_gen)
-        layout.addWidget(grp_gen)
+        # 辅助函数：创建滑块行
+        def create_slider_row(label_text, min_val, max_val, step, current_val, callback, val_fmt):
+            lbl = QLabel(label_text)
+            slider = QSlider(Qt.Orientation.Horizontal)
+            slider.setRange(min_val, max_val)
+            slider.setSingleStep(step)
+            slider.setPageStep(step)
+            slider.setValue(current_val)
+            slider.setStyleSheet(SLIDER_STYLE)
+            
+            val_lbl = QLabel(val_fmt(current_val))
+            val_lbl.setFixedWidth(50)
+            val_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            val_lbl.setStyleSheet("color: #00bcd4; font-weight: bold;")
+            
+            # 连接信号
+            slider.valueChanged.connect(lambda v: val_lbl.setText(val_fmt(v)))
+            slider.valueChanged.connect(lambda v: callback(v))
+            
+            return lbl, slider, val_lbl
 
-        # 2. Webhook
+        # -> Scan Interval (200-1200ms, step 50)
+        # Config存的是秒(0.5)，滑块用毫秒(500)
+        curr_scan = int(self.cfg.get("scan_interval") * 1000)
+        l1, s1, v1 = create_slider_row(
+            "Scan Interval (Safe):", 200, 1200, 50, curr_scan,
+            lambda v: self.cfg.set("scan_interval", v / 1000.0),
+            lambda v: f"{v}ms"
+        )
+        l_logic.addWidget(l1, 0, 0)
+        l_logic.addWidget(s1, 0, 1)
+        l_logic.addWidget(v1, 0, 2)
+
+        # -> Jitter Delay (100-300ms, step 10)
+        curr_jitter = int(self.cfg.get("jitter_delay") * 1000)
+        l2, s2, v2 = create_slider_row(
+            "Anti-Jitter Delay:", 100, 300, 10, curr_jitter,
+            lambda v: self.cfg.set("jitter_delay", v / 1000.0),
+            lambda v: f"{v}ms"
+        )
+        l_logic.addWidget(l2, 1, 0)
+        l_logic.addWidget(s2, 1, 1)
+        l_logic.addWidget(v2, 1, 2)
+        
+        grp_logic.setLayout(l_logic)
+        layout.addWidget(grp_logic)
+
+        # 2. 全局阈值设置 (移到这里)
+        grp_th = QGroupBox("Global Thresholds")
+        grp_th.setStyleSheet(gb_style)
+        l_th = QGridLayout()
+        l_th.setSpacing(10)
+        
+        thresholds = self.cfg.get("thresholds")
+        
+        # 阈值滑块生成器 (0.80 - 0.95, step 0.005 -> 映射为 800 - 950, step 5)
+        def add_thresh_slider(row, key, label):
+            curr_val = int(thresholds.get(key, 0.95) * 1000)
+            
+            def update_cfg(val):
+                t = self.cfg.get("thresholds")
+                t[key] = val / 1000.0
+                self.cfg.set("thresholds", t)
+
+            l, s, v = create_slider_row(
+                label, 800, 950, 5, curr_val,
+                update_cfg,
+                lambda val: f"{val/1000.0:.3f}"
+            )
+            l_th.addWidget(l, row, 0)
+            l_th.addWidget(s, row, 1)
+            l_th.addWidget(v, row, 2)
+
+        add_thresh_slider(0, "local", "Local %:")
+        add_thresh_slider(1, "overview", "Overview %:")
+        add_thresh_slider(2, "monster", "Rats %:")
+        add_thresh_slider(3, "probe", "Probe %:")
+        
+        grp_th.setLayout(l_th)
+        layout.addWidget(grp_th)
+
+        # 3. Webhook
         grp_wh = QGroupBox("Webhook Configuration")
         grp_wh.setStyleSheet(gb_style)
         l_wh = QVBoxLayout()
@@ -100,7 +200,7 @@ class SettingsDialog(QDialog):
         grp_wh.setLayout(l_wh)
         layout.addWidget(grp_wh)
 
-        # 3. Audio
+        # 4. Audio
         grp_audio = QGroupBox("Audio Assets")
         grp_audio.setStyleSheet(gb_style)
         grid_audio = QGridLayout()
@@ -138,12 +238,15 @@ class SettingsDialog(QDialog):
         grp_audio.setLayout(grid_audio)
         layout.addWidget(grp_audio)
         
-        layout.addStretch()
+        # 底部关闭按钮
         btn_close = QPushButton("CLOSE SETTINGS")
-        btn_close.setFixedHeight(30)
+        btn_close.setFixedHeight(35)
         btn_close.setStyleSheet(BTN_STYLE)
         btn_close.clicked.connect(self.close)
         layout.addWidget(btn_close)
+        
+        scroll.setWidget(content_widget)
+        main_layout.addWidget(scroll)
 
     def select_audio(self, key, label_widget):
         fname, _ = QFileDialog.getOpenFileName(self, "Select Audio", "", "Audio (*.wav *.mp3)")
@@ -160,7 +263,7 @@ class SettingsDialog(QDialog):
             self.cfg.set("audio_paths", paths)
             label_widget.setText(os.path.basename(fname))
 
-# === 单个监控组控件 (布局优化) ===
+# === 单个监控组控件 ===
 class GroupWidget(QGroupBox):
     def __init__(self, group_data, index, parent_win):
         super().__init__()
@@ -168,7 +271,6 @@ class GroupWidget(QGroupBox):
         self.index = index
         self.parent_win = parent_win
         
-        # 不直接设置 setTitle，而是用自定义布局来包含标题和删除按钮
         self.setStyleSheet("""
             QGroupBox { 
                 border: 1px solid #444; 
@@ -182,7 +284,6 @@ class GroupWidget(QGroupBox):
         self.setup_ui()
 
     def setup_ui(self):
-        # 主垂直布局
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
@@ -195,7 +296,6 @@ class GroupWidget(QGroupBox):
         top_bar.addWidget(lbl_title)
         top_bar.addStretch()
         
-        # 删除按钮
         self.btn_remove = QPushButton("✖")
         self.btn_remove.setFixedSize(24, 24)
         self.btn_remove.setToolTip("Remove Group")
@@ -211,7 +311,7 @@ class GroupWidget(QGroupBox):
         top_bar.addWidget(self.btn_remove)
         main_layout.addLayout(top_bar)
 
-        # 2. 按钮区域 (2x2 Grid)
+        # 2. 按钮区域
         btn_grid = QGridLayout()
         btn_grid.setSpacing(8)
 
@@ -223,7 +323,7 @@ class GroupWidget(QGroupBox):
         for btn in [self.btn_local, self.btn_overview, self.btn_monster, self.btn_probe]:
             btn.setStyleSheet(BTN_STYLE)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setFixedHeight(28) # 固定高度，保证所有 Client 一致
+            btn.setFixedHeight(28)
 
         btn_grid.addWidget(self.btn_local, 0, 0)
         btn_grid.addWidget(self.btn_overview, 0, 1)
@@ -315,7 +415,7 @@ class DebugWindow(QDialog):
         for i in range(num_groups):
             btn = QPushButton(f"CLIENT {i+1}")
             btn.setCheckable(True)
-            btn.setFixedSize(80, 30) # 增加宽度
+            btn.setFixedSize(80, 30) 
             btn.clicked.connect(lambda _, idx=i: self.switch_group(idx))
             btn.setStyleSheet("""
                 QPushButton { background: #222; border: 1px solid #444; color: #888; border-bottom: none; }
