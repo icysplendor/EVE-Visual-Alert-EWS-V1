@@ -104,13 +104,12 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         self.central = QWidget()
         self.setCentralWidget(self.central)
-        self.resize(400, 600) # 高度可以稍微减小，因为移除了阈值区
+        self.resize(400, 600)
         
         main_layout = QVBoxLayout(self.central)
         main_layout.setSpacing(10)
         main_layout.setContentsMargins(15, 15, 15, 15)
 
-        # 1. 顶部标题
         top = QHBoxLayout()
         self.lbl_title = QLabel("EVE ALERT SYSTEM")
         self.lbl_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #fff; letter-spacing: 1px;")
@@ -125,7 +124,6 @@ class MainWindow(QMainWindow):
         top.addWidget(self.btn_lang)
         main_layout.addLayout(top)
 
-        # 2. 监控组列表 (Scroll Area)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setStyleSheet("background-color: #121212; border: none;")
@@ -141,7 +139,6 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(self.scroll, 1) 
 
-        # 3. 添加组按钮
         self.btn_add_group = QPushButton("+ ADD CLIENT GROUP")
         self.btn_add_group.setFixedHeight(36)
         self.btn_add_group.setStyleSheet("""
@@ -151,7 +148,6 @@ class MainWindow(QMainWindow):
         self.btn_add_group.clicked.connect(self.add_group)
         main_layout.addWidget(self.btn_add_group)
 
-        # 4. 底部控制栏
         bot = QHBoxLayout()
         
         self.btn_settings = QPushButton("⚙ CONFIG")
@@ -180,7 +176,6 @@ class MainWindow(QMainWindow):
         bot.addWidget(self.btn_debug)
         main_layout.addLayout(bot)
 
-        # 5. 日志
         self.txt_log = QTextEdit()
         self.txt_log.setFixedHeight(100)
         self.txt_log.setReadOnly(True)
@@ -213,6 +208,7 @@ class MainWindow(QMainWindow):
         new_group = {
             "id": new_id,
             "name": f"Client {new_id+1}",
+            "scale": None,
             "regions": {"local": None, "overview": None, "monster": None, "probe": None}
         }
         groups.append(new_group)
@@ -248,8 +244,15 @@ class MainWindow(QMainWindow):
         groups = self.cfg.get("groups")
         if 0 <= group_index < len(groups):
             groups[group_index]["regions"][key] = list(rect)
+            
+            # 关键修改：如果修改了 Local 区域，重置 scale，触发重新检测
+            if key == "local":
+                groups[group_index]["scale"] = None
+                self.log(f"Client {group_index+1}: Local Region Updated (Scale Reset)")
+            else:
+                self.log(f"Client {group_index+1}: {key.upper()} Updated")
+                
             self.cfg.set("groups", groups)
-            self.log(f"Client {group_index+1}: {key.upper()} Updated")
 
     def update_cfg(self, section, key, val):
         t = self.cfg.get(section)
