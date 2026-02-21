@@ -6,7 +6,8 @@ CONFIG_FILE = "config.json"
 DEFAULT_CONFIG = {
     "language": "CN",
     "window_pos": [100, 100],
-    "jitter_delay": 0.18, # 新增：防抖延迟时间 (秒)
+    "jitter_delay": 0.18, # 防抖延迟 (秒)
+    "scan_interval": 0.5, # 新增：常规检测间隔 (秒)
     "groups": [
         {
             "id": 0,
@@ -65,6 +66,8 @@ class ConfigManager:
                     # 确保新增字段存在
                     if "jitter_delay" not in self.config:
                         self.config["jitter_delay"] = 0.18
+                    if "scan_interval" not in self.config:
+                        self.config["scan_interval"] = 0.5
 
             except:
                 print("加载配置文件失败，使用默认配置")
