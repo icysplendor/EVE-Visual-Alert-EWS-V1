@@ -7,7 +7,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 class AlarmWorker(QObject):
     log_signal = pyqtSignal(str)
     probe_signal = pyqtSignal(bool)
-    location_update_signal = pyqtSignal(int, str) # client_idx, system_name
+    location_update_signal = pyqtSignal(int, str)
 
     def __init__(self, config_manager, vision_engine):
         super().__init__()
@@ -25,7 +25,6 @@ class AlarmWorker(QObject):
         self.last_probe_time = 0.0
         self.REPEAT_INTERVAL = 2.0 
         
-        # 位置检测计时器
         self.last_location_check_time = 0.0
 
     def start(self):
@@ -60,7 +59,7 @@ class AlarmWorker(QObject):
                 self.vision.load_templates()
                 report = (
                     f"[{now_str}] System Check: Templates Loaded.\n"
-                    f"[{now_str}] Logic: Security + Location Scan"
+                    f"[{now_str}] Logic: Security + Location Scan (3s)"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -73,8 +72,8 @@ class AlarmWorker(QObject):
             major_sound = None
             pending_threat_detected = False
             
-            # 检查是否需要更新位置 (至少间隔 1 秒)
-            check_location = (loop_start_time - self.last_location_check_time) >= 1.0
+            # === 修改点 1: 间隔改为 3.0 秒 ===
+            check_location = (loop_start_time - self.last_location_check_time) >= 3.0
             if check_location:
                 self.last_location_check_time = loop_start_time
 
@@ -83,10 +82,8 @@ class AlarmWorker(QObject):
                 regions = grp["regions"]
                 current_scale = grp.get("scale")
                 
-                # 1. 截图 (所有功能共用这些截图，保证同步)
                 img_local = self.vision.capture_screen(regions.get("local"))
                 
-                # 自动缩放检测
                 if not current_scale:
                     if img_local is not None:
                         self.log_signal.emit(f"[{now_str}] [{client_name}] Detecting UI Scale...")
@@ -112,7 +109,6 @@ class AlarmWorker(QObject):
                 img_monster = self.vision.capture_screen(regions.get("monster"))
                 img_probe = self.vision.capture_screen(regions.get("probe"))
                 
-                # === 位置检测逻辑 (同步执行) ===
                 current_system = "Unknown"
                 if check_location:
                     img_location = self.vision.capture_screen(regions.get("location"))
@@ -120,12 +116,10 @@ class AlarmWorker(QObject):
                     sys_name, sys_score = self.vision.match_location_name(img_location, current_scale, loc_thresh)
                     if sys_name:
                         current_system = sys_name
-                        # 发送更新信号给 UI
                         self.location_update_signal.emit(i, sys_name)
                     else:
                         self.location_update_signal.emit(i, "Unknown")
 
-                # === 安全扫描逻辑 ===
                 if i not in self.threat_persistence:
                     self.threat_persistence[i] = {"local": 0, "overview": 0, "monster": 0, "probe": 0}
 
@@ -177,16 +171,17 @@ class AlarmWorker(QObject):
                     elif pending: mark = "⚡"
                     return f"{cnt}({score:.2f}){mark}"
 
-                # 日志中加入位置信息
-                # [12:00:00] [Client 1 @ Jita] L:0(0.00)...
+                # === 修改点 2: 日志格式调整 ===
+                # 位置信息移到末尾
                 loc_str = f" @ {current_system}" if check_location and current_system != "Unknown" else ""
                 
                 log_line = (
-                    f"[{now_str}] [{client_name}{loc_str}] "
+                    f"[{now_str}] [{client_name}] "
                     f"L:{fmt(cnt_local, s_loc, is_local, p_local)} "
                     f"O:{fmt(cnt_overview, s_ovr, is_overview, p_overview)} "
                     f"M:{fmt(cnt_monster, s_mon, is_monster, p_monster)} "
                     f"P:{fmt(cnt_probe, s_prb, is_probe, p_probe)}"
+                    f"{loc_str}" # 放在最后
                 )
                 self.log_signal.emit(log_line)
 
