@@ -138,9 +138,7 @@ class VisionEngine:
 
     def count_matches(self, screen_img, template_list, threshold, check_safe_color=False):
         """
-        统计匹配数量
-        返回: (count, max_score)
-        注意：max_score 现在只反映【未被颜色过滤】的有效目标的最高分
+        统计匹配数量，并返回【非友军】的最高分（包括噪点）
         """
         if screen_img is None or not template_list:
             return 0, 0.0
@@ -167,30 +165,42 @@ class VisionEngine:
                 while True:
                     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
                     
-                    if max_val >= threshold:
+                    # 只要分数有意义（>0.2），就进入判断，哪怕它低于阈值
+                    if max_val >= 0.2:
                         top_left = max_loc
                         bottom_right = (top_left[0] + tmpl_w, top_left[1] + tmpl_h)
                         
-                        center_x = int(top_left[0] + tmpl_w/2)
-                        center_y = int(top_left[1] + tmpl_h/2)
+                        # 颜色检查
+                        is_safe = False
+                        if check_safe_color:
+                            crop_img = screen_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
+                            if self._is_safe_color(crop_img):
+                                is_safe = True
                         
-                        if mask_map[center_y, center_x] == 0:
-                            # 颜色检查
-                            is_safe = False
-                            if check_safe_color:
-                                crop_img = screen_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
-                                if self._is_safe_color(crop_img):
-                                    is_safe = True
+                        if is_safe:
+                            # 是友军：直接抹去，不记录分数，继续找下一个
+                            cv2.rectangle(res, top_left, bottom_right, -1.0, -1)
+                            continue
+                        
+                        else:
+                            # 是非友军（可能是敌对，也可能是背景噪点）
+                            # 记录最高分（哪怕是噪点）
+                            if max_val > global_max_score:
+                                global_max_score = max_val
                             
-                            # === 关键修改：只有不是友军时，才记录分数和数量 ===
-                            if not is_safe:
-                                total_count += 1
-                                if max_val > global_max_score:
-                                    global_max_score = max_val
-                                    
-                                cv2.rectangle(mask_map, top_left, bottom_right, 255, -1)
-                        
-                        cv2.rectangle(res, top_left, bottom_right, -1.0, -1)
+                            # 只有当分数真正达标时，才计数
+                            if max_val >= threshold:
+                                center_x = int(top_left[0] + tmpl_w/2)
+                                center_y = int(top_left[1] + tmpl_h/2)
+                                if mask_map[center_y, center_x] == 0:
+                                    total_count += 1
+                                    cv2.rectangle(mask_map, top_left, bottom_right, 255, -1)
+                                
+                                # 抹去已统计区域，继续找下一个
+                                cv2.rectangle(res, top_left, bottom_right, -1.0, -1)
+                            else:
+                                # 分数没达标，说明剩下的都是更小的噪点了，退出当前模板的循环
+                                break
                     else:
                         break 
             except Exception:
