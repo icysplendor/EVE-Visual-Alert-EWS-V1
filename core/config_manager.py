@@ -12,12 +12,13 @@ DEFAULT_CONFIG = {
         {
             "id": 0,
             "name": "Client 1",
-            "scale": None, # 新增：存储该客户端的缩放比例 (字符串 "90", "100", "125")
+            "scale": None,
             "regions": {
                 "local": None,
                 "overview": None,
                 "monster": None,
-                "probe": None
+                "probe": None,
+                "location": None # 新增：位置区域
             }
         }
     ],
@@ -25,7 +26,8 @@ DEFAULT_CONFIG = {
         "local": 0.95,
         "overview": 0.95,
         "monster": 0.95,
-        "probe": 0.95
+        "probe": 0.95,
+        "location": 0.85 # 新增：位置匹配阈值
     },
     "webhook_url": "",
     "audio_paths": {
@@ -68,6 +70,10 @@ class ConfigManager:
                         self.config["jitter_delay"] = 0.18
                     if "scan_interval" not in self.config:
                         self.config["scan_interval"] = 0.5
+                    
+                    # 确保阈值里有 location
+                    if "location" not in self.config["thresholds"]:
+                        self.config["thresholds"]["location"] = 0.85
 
             except:
                 print("加载配置文件失败，使用默认配置")
