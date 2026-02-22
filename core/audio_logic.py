@@ -72,13 +72,13 @@ class AlarmWorker(QObject):
             major_sound = None
             pending_threat_detected = False
             
-            # === 修改点 1: 间隔改为 3.0 秒 ===
             check_location = (loop_start_time - self.last_location_check_time) >= 3.0
             if check_location:
                 self.last_location_check_time = loop_start_time
 
             for i, grp in enumerate(groups):
-                client_name = grp["name"]
+                # 获取 Client ID (C1, C2...)
+                client_id = f"C{i+1}"
                 regions = grp["regions"]
                 current_scale = grp.get("scale")
                 
@@ -86,17 +86,17 @@ class AlarmWorker(QObject):
                 
                 if not current_scale:
                     if img_local is not None:
-                        self.log_signal.emit(f"[{now_str}] [{client_name}] Detecting UI Scale...")
+                        self.log_signal.emit(f"[{now_str}-{client_id}] Detecting Scale...")
                         detected_scale = self.vision.detect_scale(img_local)
                         if detected_scale:
                             grp["scale"] = detected_scale
                             all_groups = self.cfg.get("groups")
                             all_groups[i]["scale"] = detected_scale
                             self.cfg.set("groups", all_groups)
-                            self.log_signal.emit(f"[{now_str}] [{client_name}] Scale Detected: {detected_scale}%")
+                            self.log_signal.emit(f"[{now_str}-{client_id}] Scale: {detected_scale}%")
                             current_scale = detected_scale
                         else:
-                            self.log_signal.emit(f"[{now_str}] [{client_name}] ⚠️ Scale Detection Failed!")
+                            self.log_signal.emit(f"[{now_str}-{client_id}] ⚠️ Scale Fail")
                             continue 
                     else:
                         continue 
@@ -109,7 +109,7 @@ class AlarmWorker(QObject):
                 img_monster = self.vision.capture_screen(regions.get("monster"))
                 img_probe = self.vision.capture_screen(regions.get("probe"))
                 
-                current_system = "Unknown"
+                current_system = ""
                 if check_location:
                     img_location = self.vision.capture_screen(regions.get("location"))
                     loc_thresh = thresholds.get("location", 0.85)
@@ -165,23 +165,24 @@ class AlarmWorker(QObject):
                 elif is_monster:
                     if major_sound is None: major_sound = "monster"
                 
+                # === 极简日志格式 ===
+                # [14:41:33-C1] L:3(99)🔴 O:0(0) M:0(0) P:0(0) @ Jita
                 def fmt(cnt, score, confirmed, pending):
                     mark = ""
                     if confirmed: mark = "🔴"
                     elif pending: mark = "⚡"
-                    return f"{cnt}({score:.2f}){mark}"
+                    # 分数转整数
+                    return f"{cnt}({int(score*100)}){mark}"
 
-                # === 修改点 2: 日志格式调整 ===
-                # 位置信息移到末尾
-                loc_str = f" @ {current_system}" if check_location and current_system != "Unknown" else ""
+                loc_str = f" @ {current_system}" if current_system else ""
                 
                 log_line = (
-                    f"[{now_str}] [{client_name}] "
+                    f"[{now_str}-{client_id}] "
                     f"L:{fmt(cnt_local, s_loc, is_local, p_local)} "
                     f"O:{fmt(cnt_overview, s_ovr, is_overview, p_overview)} "
                     f"M:{fmt(cnt_monster, s_mon, is_monster, p_monster)} "
                     f"P:{fmt(cnt_probe, s_prb, is_probe, p_probe)}"
-                    f"{loc_str}" # 放在最后
+                    f"{loc_str}"
                 )
                 self.log_signal.emit(log_line)
 
@@ -198,10 +199,19 @@ class AlarmWorker(QObject):
                     should_play = True
                 
                 if should_play:
-                    alert_msg = f"[{now_str}] ⚠️ ALERT: {major_sound.upper()}"
-                    self.log_signal.emit(alert_msg)
+                    # 移除了单独的 ALERT 日志行
+                    # 依然发送信号给 webhook 和声音
                     self.last_alert_time = loop_start_time
                     self.last_alert_type = major_sound
+                    
+                    # 触发声音 (主界面 handle_alarm_signal 依赖 ⚠️，所以我们这里发一个隐形的信号或者复用 log_line 里的红点？)
+                    # 不，handle_alarm_signal 监听的是日志文本。
+                    # 如果删除了 ALERT 行，我们需要确保 log_line 里包含触发词，或者发送一个专门的控制信号。
+                    # 为了兼容性，我们发送一个包含 ⚠️ 的控制日志，但不让它太占地方。
+                    # 或者，我们在上面的 log_line 里已经有了 🔴。
+                    # 最好还是发一个专门的控制消息，主界面可以拦截它不显示在文本框，只播放声音。
+                    # 但为了简单，我们还是发一个极短的提示。
+                    self.log_signal.emit(f"⚠️ {major_sound.upper()}")
                     
                     webhook = self.cfg.get("webhook_url")
                     if webhook:
