@@ -165,7 +165,11 @@ class VisionEngine:
                 while True:
                     min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
                     
-                    # 只要分数有意义（>0.2），就进入判断，哪怕它低于阈值
+                    # === 关键修复：检查 inf 和 nan ===
+                    if np.isinf(max_val) or np.isnan(max_val):
+                        max_val = 0.0
+                    
+                    # 只要分数有意义（>0.2），就进入判断
                     if max_val >= 0.2:
                         top_left = max_loc
                         bottom_right = (top_left[0] + tmpl_w, top_left[1] + tmpl_h)
@@ -183,12 +187,10 @@ class VisionEngine:
                             continue
                         
                         else:
-                            # 是非友军（可能是敌对，也可能是背景噪点）
-                            # 记录最高分（哪怕是噪点）
+                            # 是非友军
                             if max_val > global_max_score:
                                 global_max_score = max_val
                             
-                            # 只有当分数真正达标时，才计数
                             if max_val >= threshold:
                                 center_x = int(top_left[0] + tmpl_w/2)
                                 center_y = int(top_left[1] + tmpl_h/2)
@@ -196,10 +198,8 @@ class VisionEngine:
                                     total_count += 1
                                     cv2.rectangle(mask_map, top_left, bottom_right, 255, -1)
                                 
-                                # 抹去已统计区域，继续找下一个
                                 cv2.rectangle(res, top_left, bottom_right, -1.0, -1)
                             else:
-                                # 分数没达标，说明剩下的都是更小的噪点了，退出当前模板的循环
                                 break
                     else:
                         break 
