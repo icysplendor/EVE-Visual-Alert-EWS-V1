@@ -62,7 +62,7 @@ class SettingsDialog(QDialog):
         self.cfg = cfg
         self.setWindowTitle("Advanced Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.resize(500, 650)
+        self.resize(500, 700) # 再次增加高度
         
         icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
@@ -100,24 +100,19 @@ class SettingsDialog(QDialog):
         }
         """
 
-        # === 核心逻辑：步进滑块生成器 ===
         def create_stepped_slider(label_text, real_min, real_max, step_size, current_real_val, callback, val_fmt):
-            # 计算总步数
             total_steps = int((real_max - real_min) / step_size)
-            
-            # 计算当前滑块位置 (0 到 total_steps)
             current_slider_pos = int((current_real_val - real_min) / step_size)
-            # 边界保护
             current_slider_pos = max(0, min(total_steps, current_slider_pos))
 
             lbl = QLabel(label_text)
             slider = QSlider(Qt.Orientation.Horizontal)
-            slider.setRange(0, total_steps) # 设置范围为步数
+            slider.setRange(0, total_steps)
             slider.setSingleStep(1)
             slider.setPageStep(1)
             slider.setValue(current_slider_pos)
             slider.setTickPosition(QSlider.TickPosition.TicksBelow)
-            slider.setTickInterval(1) # 显示每一格的刻度
+            slider.setTickInterval(1)
             slider.setStyleSheet(SLIDER_STYLE)
             
             val_lbl = QLabel(val_fmt(current_real_val))
@@ -126,9 +121,7 @@ class SettingsDialog(QDialog):
             val_lbl.setStyleSheet("color: #00bcd4; font-weight: bold;")
             
             def on_change(pos):
-                # 将滑块位置(0..N) 转换回 真实数值
                 real_val = real_min + (pos * step_size)
-                # 修正浮点数精度问题
                 real_val = round(real_val, 5)
                 val_lbl.setText(val_fmt(real_val))
                 callback(real_val)
@@ -136,16 +129,15 @@ class SettingsDialog(QDialog):
             slider.valueChanged.connect(on_change)
             return lbl, slider, val_lbl
 
-        # 1. 扫描与延迟设置
+        # 1. 逻辑设置
         grp_logic = QGroupBox("Logic Configuration")
         grp_logic.setStyleSheet(gb_style)
         l_logic = QGridLayout()
         l_logic.setSpacing(10)
         
-        # -> Scan Interval: 200ms - 1200ms, Step 50ms
         curr_scan = self.cfg.get("scan_interval") * 1000
         l1, s1, v1 = create_stepped_slider(
-            "Scan Interval (Safe):", 200, 1200, 50, curr_scan,
+            "Scan Interval:", 200, 1200, 50, curr_scan,
             lambda v: self.cfg.set("scan_interval", v / 1000.0),
             lambda v: f"{int(v)}ms"
         )
@@ -153,21 +145,19 @@ class SettingsDialog(QDialog):
         l_logic.addWidget(s1, 0, 1)
         l_logic.addWidget(v1, 0, 2)
 
-        # -> Jitter Delay: 100ms - 300ms, Step 10ms
         curr_jitter = self.cfg.get("jitter_delay") * 1000
         l2, s2, v2 = create_stepped_slider(
-            "Anti-Jitter Delay:", 100, 300, 10, curr_jitter,
+            "Anti-Jitter:", 100, 300, 10, curr_jitter,
             lambda v: self.cfg.set("jitter_delay", v / 1000.0),
             lambda v: f"{int(v)}ms"
         )
         l_logic.addWidget(l2, 1, 0)
         l_logic.addWidget(s2, 1, 1)
         l_logic.addWidget(v2, 1, 2)
-        
         grp_logic.setLayout(l_logic)
         layout.addWidget(grp_logic)
 
-        # 2. 全局阈值设置
+        # 2. 阈值设置 (新增 Location)
         grp_th = QGroupBox("Global Thresholds")
         grp_th.setStyleSheet(gb_style)
         l_th = QGridLayout()
@@ -175,10 +165,8 @@ class SettingsDialog(QDialog):
         
         thresholds = self.cfg.get("thresholds")
         
-        # 阈值: 0.800 - 0.995, Step 0.005
         def add_thresh_slider(row, key, label):
             curr_val = thresholds.get(key, 0.95)
-            
             def update_cfg(val):
                 t = self.cfg.get("thresholds")
                 t[key] = val
@@ -197,6 +185,7 @@ class SettingsDialog(QDialog):
         add_thresh_slider(1, "overview", "Overview %:")
         add_thresh_slider(2, "monster", "Rats %:")
         add_thresh_slider(3, "probe", "Probe %:")
+        add_thresh_slider(4, "location", "System %:") # 新增
         
         grp_th.setLayout(l_th)
         layout.addWidget(grp_th)
@@ -251,7 +240,6 @@ class SettingsDialog(QDialog):
         grp_audio.setLayout(grid_audio)
         layout.addWidget(grp_audio)
         
-        # 底部关闭按钮
         btn_close = QPushButton("CLOSE SETTINGS")
         btn_close.setFixedHeight(35)
         btn_close.setStyleSheet(BTN_STYLE)
@@ -301,12 +289,19 @@ class GroupWidget(QGroupBox):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
 
-        # 1. 顶部栏：标题 + 删除按钮
+        # 1. 顶部栏：标题 + 位置信息 + 删除按钮
         top_bar = QHBoxLayout()
         
+        # 标题
         lbl_title = QLabel(f"CLIENT {self.index + 1}")
         lbl_title.setStyleSheet("font-weight: bold; color: #00bcd4; font-size: 12px;")
         top_bar.addWidget(lbl_title)
+        
+        # 位置信息显示 (新增)
+        self.lbl_location = QLabel("[ Unknown ]")
+        self.lbl_location.setStyleSheet("color: #888; font-size: 11px; margin-left: 10px;")
+        top_bar.addWidget(self.lbl_location)
+        
         top_bar.addStretch()
         
         self.btn_remove = QPushButton("✖")
@@ -324,7 +319,7 @@ class GroupWidget(QGroupBox):
         top_bar.addWidget(self.btn_remove)
         main_layout.addLayout(top_bar)
 
-        # 2. 按钮区域
+        # 2. 按钮区域 (新增 Location 按钮)
         btn_grid = QGridLayout()
         btn_grid.setSpacing(8)
 
@@ -332,8 +327,10 @@ class GroupWidget(QGroupBox):
         self.btn_overview = QPushButton()
         self.btn_monster = QPushButton()
         self.btn_probe = QPushButton()
+        self.btn_location = QPushButton() # 新增
         
-        for btn in [self.btn_local, self.btn_overview, self.btn_monster, self.btn_probe]:
+        btns = [self.btn_local, self.btn_overview, self.btn_monster, self.btn_probe, self.btn_location]
+        for btn in btns:
             btn.setStyleSheet(BTN_STYLE)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(28)
@@ -342,6 +339,8 @@ class GroupWidget(QGroupBox):
         btn_grid.addWidget(self.btn_overview, 0, 1)
         btn_grid.addWidget(self.btn_monster, 1, 0)
         btn_grid.addWidget(self.btn_probe, 1, 1)
+        # Location 按钮放在第三行，占满两列
+        btn_grid.addWidget(self.btn_location, 2, 0, 1, 2)
         
         main_layout.addLayout(btn_grid)
 
@@ -349,6 +348,7 @@ class GroupWidget(QGroupBox):
         self.btn_overview.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "overview"))
         self.btn_monster.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "monster"))
         self.btn_probe.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "probe"))
+        self.btn_location.clicked.connect(lambda: self.parent_win.start_region_selection(self.index, "location"))
 
         self.update_texts()
 
@@ -358,6 +358,14 @@ class GroupWidget(QGroupBox):
         self.btn_overview.setText(_("btn_overview"))
         self.btn_monster.setText(_("btn_npc"))
         self.btn_probe.setText(_("btn_probe"))
+        self.btn_location.setText(_("btn_location"))
+
+    def update_location_display(self, system_name):
+        self.lbl_location.setText(f"[ {system_name} ]")
+        if system_name == "Unknown":
+            self.lbl_location.setStyleSheet("color: #888; font-size: 11px; margin-left: 10px;")
+        else:
+            self.lbl_location.setStyleSheet("color: #00ff00; font-weight: bold; font-size: 11px; margin-left: 10px;")
 
     def request_remove(self):
         msg_box = QMessageBox(self)
@@ -382,7 +390,7 @@ class DebugWindow(QDialog):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setStyleSheet("background-color: #121212; color: #ccc;")
-        self.resize(650, 500)
+        self.resize(750, 500) # 增加宽度以容纳 Location
         
         self.current_group_idx = 0
         self.group_buttons = []
@@ -400,7 +408,8 @@ class DebugWindow(QDialog):
         self.img_layout = QHBoxLayout()
         self.img_layout.setSpacing(10)
         
-        for key in ["Local", "Overview", "Rats", "Probe"]:
+        # 增加 Location 预览
+        for key in ["Local", "Overview", "Rats", "Probe", "Location"]:
             vbox = QVBoxLayout()
             lbl_title = QLabel(key.upper())
             lbl_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -408,6 +417,7 @@ class DebugWindow(QDialog):
             lbl_title.setStyleSheet("color: #00bcd4; font-weight: bold;")
             
             lbl_img = QLabel()
+            # Location 不需要那么长，但为了布局统一，先设一样大，或者可以用 stretch
             lbl_img.setFixedSize(120, 500) 
             lbl_img.setStyleSheet("border: 1px solid #333; background: #000;")
             lbl_img.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
@@ -455,7 +465,8 @@ class DebugWindow(QDialog):
             "Local": "local",
             "Overview": "overview",
             "Rats": "monster",
-            "Probe": "probe"
+            "Probe": "probe",
+            "Location": "location"
         }
         for ui_key, data_key in mapping.items():
             img = all_groups_images.get((self.current_group_idx, data_key))
