@@ -46,7 +46,6 @@ class AlarmWorker(QObject):
 
     def _loop(self):
         while self.running:
-            # === 节拍器起点 ===
             loop_start_time = time.time()
             now = datetime.now()
             now_str = now.strftime("%H:%M:%S")
@@ -60,7 +59,7 @@ class AlarmWorker(QObject):
                 self.vision.load_templates()
                 report = (
                     f"[{now_str}] System Check: Templates Loaded.\n"
-                    f"[{now_str}] Logic: Metronome Loop (Target {jitter_delay}s)"
+                    f"[{now_str}] Logic: Smart Frequency ({scan_interval}s / {jitter_delay}s)"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -183,7 +182,6 @@ class AlarmWorker(QObject):
                 )
                 self.log_signal.emit(log_line)
 
-            # === 循环结束后的动作 ===
             if any_probe_triggered:
                 if loop_start_time - self.last_probe_time > 2.0:
                     self.probe_signal.emit(True)
@@ -191,17 +189,13 @@ class AlarmWorker(QObject):
 
             if major_sound:
                 should_play = False
-                # 情况1: 威胁类型升级 (例如 Local -> Mixed) -> 立即报警
                 if major_sound != self.last_alert_type:
                     should_play = True
-                # 情况2: 同类型威胁，且冷却时间已过 -> 再次报警
                 elif (loop_start_time - self.last_alert_time) > self.REPEAT_INTERVAL:
                     should_play = True
                 
                 if should_play:
-                    # 发送短信号触发声音
                     self.log_signal.emit(f"⚠️ {major_sound.upper()}")
-                    
                     self.last_alert_time = loop_start_time
                     self.last_alert_type = major_sound
                     
@@ -210,20 +204,19 @@ class AlarmWorker(QObject):
                         try:
                             threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
                         except: pass
-            
-            # === 关键修复：移除了 else: self.last_alert_type = None ===
-            # 这样即使偶发丢帧，也不会重置冷却时间，保证声音间隔稳定
+            else:
+                self.last_alert_type = None
 
-            # === 节拍器式休眠 ===
-            # 计算本轮逻辑消耗了多少时间
+            # === 睡眠控制 (优化版) ===
+            # 只有在 "疑似威胁正在确认中" (Pending) 时，才使用极速模式 (0.18s)
+            # 无论是 "完全安全" 还是 "已经确认并报警" (Confirmed)，都回归用户设置的常规频率 (0.5s)
+            # 这样报警时的日志就不会刷得太快了
             elapsed = time.time() - loop_start_time
             
-            if major_sound or pending_threat_detected:
+            if pending_threat_detected:
                 target_sleep = jitter_delay
             else:
                 target_sleep = scan_interval
             
-            # 动态调整休眠时间：目标间隔 - 已消耗时间
-            # 如果逻辑跑慢了(elapsed > target)，则不休眠(0)，立即追赶
             actual_sleep = max(0.0, target_sleep - elapsed)
             time.sleep(actual_sleep)
