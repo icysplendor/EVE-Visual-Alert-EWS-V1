@@ -71,6 +71,9 @@ class MainWindow(QMainWindow):
         self.logic.log_signal.connect(self.handle_alarm_signal)
         self.logic.probe_signal.connect(self.handle_probe_signal)
         
+        # 连接位置更新信号
+        self.logic.location_update_signal.connect(self.update_client_location)
+        
         self.debug_timer = QTimer()
         self.debug_timer.timeout.connect(self.update_debug_view)
         
@@ -104,7 +107,7 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         self.central = QWidget()
         self.setCentralWidget(self.central)
-        self.resize(400, 600)
+        self.resize(400, 650)
         
         main_layout = QVBoxLayout(self.central)
         main_layout.setSpacing(10)
@@ -209,7 +212,7 @@ class MainWindow(QMainWindow):
             "id": new_id,
             "name": f"Client {new_id+1}",
             "scale": None,
-            "regions": {"local": None, "overview": None, "monster": None, "probe": None}
+            "regions": {"local": None, "overview": None, "monster": None, "probe": None, "location": None}
         }
         groups.append(new_group)
         self.cfg.set("groups", groups)
@@ -245,7 +248,6 @@ class MainWindow(QMainWindow):
         if 0 <= group_index < len(groups):
             groups[group_index]["regions"][key] = list(rect)
             
-            # 关键修改：如果修改了 Local 区域，重置 scale，触发重新检测
             if key == "local":
                 groups[group_index]["scale"] = None
                 self.log(f"Client {group_index+1}: Local Region Updated (Scale Reset)")
@@ -324,6 +326,15 @@ class MainWindow(QMainWindow):
             if "probe" in self.sounds:
                 self.sounds["probe"].play()
 
+    # === 新增：更新客户端位置显示 ===
+    def update_client_location(self, client_idx, system_name):
+        # 找到对应的 GroupWidget
+        # scroll_layout 里的 item 顺序和 client_idx 是一致的 (0, 1, 2...)
+        if client_idx < self.scroll_layout.count():
+            item = self.scroll_layout.itemAt(client_idx)
+            if item and item.widget() and isinstance(item.widget(), GroupWidget):
+                item.widget().update_location_display(system_name)
+
     def show_debug_window(self):
         groups = self.cfg.get("groups")
         self.debug_window.refresh_tabs(len(groups))
@@ -344,6 +355,7 @@ class MainWindow(QMainWindow):
             images_to_show[(i, "overview")] = self.vision.capture_screen(regions.get("overview"))
             images_to_show[(i, "monster")] = self.vision.capture_screen(regions.get("monster"))
             images_to_show[(i, "probe")] = self.vision.capture_screen(regions.get("probe"))
+            images_to_show[(i, "location")] = self.vision.capture_screen(regions.get("location"))
             
         self.debug_window.update_images(images_to_show)
 
