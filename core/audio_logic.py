@@ -46,6 +46,7 @@ class AlarmWorker(QObject):
 
     def _loop(self):
         while self.running:
+            # === 节拍器起点 ===
             loop_start_time = time.time()
             now = datetime.now()
             now_str = now.strftime("%H:%M:%S")
@@ -59,7 +60,7 @@ class AlarmWorker(QObject):
                 self.vision.load_templates()
                 report = (
                     f"[{now_str}] System Check: Templates Loaded.\n"
-                    f"[{now_str}] Logic: Security + Location Scan (3s)"
+                    f"[{now_str}] Logic: Metronome Loop (Target {jitter_delay}s)"
                 )
                 self.log_signal.emit(report)
                 self.first_run = False
@@ -77,7 +78,6 @@ class AlarmWorker(QObject):
                 self.last_location_check_time = loop_start_time
 
             for i, grp in enumerate(groups):
-                # 获取 Client ID (C1, C2...)
                 client_id = f"C{i+1}"
                 regions = grp["regions"]
                 current_scale = grp.get("scale")
@@ -165,13 +165,10 @@ class AlarmWorker(QObject):
                 elif is_monster:
                     if major_sound is None: major_sound = "monster"
                 
-                # === 极简日志格式 ===
-                # [14:41:33-C1] L:3(99)🔴 O:0(0) M:0(0) P:0(0) @ Jita
                 def fmt(cnt, score, confirmed, pending):
                     mark = ""
                     if confirmed: mark = "🔴"
                     elif pending: mark = "⚡"
-                    # 分数转整数
                     return f"{cnt}({int(score*100)}){mark}"
 
                 loc_str = f" @ {current_system}" if current_system else ""
@@ -186,6 +183,7 @@ class AlarmWorker(QObject):
                 )
                 self.log_signal.emit(log_line)
 
+            # === 循环结束后的动作 ===
             if any_probe_triggered:
                 if loop_start_time - self.last_probe_time > 2.0:
                     self.probe_signal.emit(True)
@@ -193,35 +191,39 @@ class AlarmWorker(QObject):
 
             if major_sound:
                 should_play = False
+                # 情况1: 威胁类型升级 (例如 Local -> Mixed) -> 立即报警
                 if major_sound != self.last_alert_type:
                     should_play = True
+                # 情况2: 同类型威胁，且冷却时间已过 -> 再次报警
                 elif (loop_start_time - self.last_alert_time) > self.REPEAT_INTERVAL:
                     should_play = True
                 
                 if should_play:
-                    # 移除了单独的 ALERT 日志行
-                    # 依然发送信号给 webhook 和声音
+                    # 发送短信号触发声音
+                    self.log_signal.emit(f"⚠️ {major_sound.upper()}")
+                    
                     self.last_alert_time = loop_start_time
                     self.last_alert_type = major_sound
-                    
-                    # 触发声音 (主界面 handle_alarm_signal 依赖 ⚠️，所以我们这里发一个隐形的信号或者复用 log_line 里的红点？)
-                    # 不，handle_alarm_signal 监听的是日志文本。
-                    # 如果删除了 ALERT 行，我们需要确保 log_line 里包含触发词，或者发送一个专门的控制信号。
-                    # 为了兼容性，我们发送一个包含 ⚠️ 的控制日志，但不让它太占地方。
-                    # 或者，我们在上面的 log_line 里已经有了 🔴。
-                    # 最好还是发一个专门的控制消息，主界面可以拦截它不显示在文本框，只播放声音。
-                    # 但为了简单，我们还是发一个极短的提示。
-                    self.log_signal.emit(f"⚠️ {major_sound.upper()}")
                     
                     webhook = self.cfg.get("webhook_url")
                     if webhook:
                         try:
                             threading.Thread(target=requests.post, args=(webhook,), kwargs={'json':{'alert':major_sound}}).start()
                         except: pass
-            else:
-                self.last_alert_type = None
+            
+            # === 关键修复：移除了 else: self.last_alert_type = None ===
+            # 这样即使偶发丢帧，也不会重置冷却时间，保证声音间隔稳定
 
+            # === 节拍器式休眠 ===
+            # 计算本轮逻辑消耗了多少时间
+            elapsed = time.time() - loop_start_time
+            
             if major_sound or pending_threat_detected:
-                time.sleep(jitter_delay)
+                target_sleep = jitter_delay
             else:
-                time.sleep(scan_interval)
+                target_sleep = scan_interval
+            
+            # 动态调整休眠时间：目标间隔 - 已消耗时间
+            # 如果逻辑跑慢了(elapsed > target)，则不休眠(0)，立即追赶
+            actual_sleep = max(0.0, target_sleep - elapsed)
+            time.sleep(actual_sleep)
