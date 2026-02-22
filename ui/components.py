@@ -62,7 +62,7 @@ class SettingsDialog(QDialog):
         self.cfg = cfg
         self.setWindowTitle("Advanced Settings")
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
-        self.resize(500, 700) # 再次增加高度
+        self.resize(500, 700)
         
         icon_path = resource_path(os.path.join("assets", "app.ico"))
         if os.path.exists(icon_path):
@@ -157,7 +157,7 @@ class SettingsDialog(QDialog):
         grp_logic.setLayout(l_logic)
         layout.addWidget(grp_logic)
 
-        # 2. 阈值设置 (新增 Location)
+        # 2. 阈值设置
         grp_th = QGroupBox("Global Thresholds")
         grp_th.setStyleSheet(gb_style)
         l_th = QGridLayout()
@@ -185,7 +185,7 @@ class SettingsDialog(QDialog):
         add_thresh_slider(1, "overview", "Overview %:")
         add_thresh_slider(2, "monster", "Rats %:")
         add_thresh_slider(3, "probe", "Probe %:")
-        add_thresh_slider(4, "location", "System %:") # 新增
+        add_thresh_slider(4, "location", "System %:")
         
         grp_th.setLayout(l_th)
         layout.addWidget(grp_th)
@@ -264,7 +264,7 @@ class SettingsDialog(QDialog):
             self.cfg.set("audio_paths", paths)
             label_widget.setText(os.path.basename(fname))
 
-# === 单个监控组控件 ===
+# === 单个监控组控件 (布局优化) ===
 class GroupWidget(QGroupBox):
     def __init__(self, group_data, index, parent_win):
         super().__init__()
@@ -289,15 +289,12 @@ class GroupWidget(QGroupBox):
         main_layout.setContentsMargins(5, 5, 5, 5)
         main_layout.setSpacing(5)
 
-        # 1. 顶部栏：标题 + 位置信息 + 删除按钮
+        # 1. 顶部栏
         top_bar = QHBoxLayout()
-        
-        # 标题
         lbl_title = QLabel(f"CLIENT {self.index + 1}")
         lbl_title.setStyleSheet("font-weight: bold; color: #00bcd4; font-size: 12px;")
         top_bar.addWidget(lbl_title)
         
-        # 位置信息显示 (新增)
         self.lbl_location = QLabel("[ Unknown ]")
         self.lbl_location.setStyleSheet("color: #888; font-size: 11px; margin-left: 10px;")
         top_bar.addWidget(self.lbl_location)
@@ -319,28 +316,35 @@ class GroupWidget(QGroupBox):
         top_bar.addWidget(self.btn_remove)
         main_layout.addLayout(top_bar)
 
-        # 2. 按钮区域 (新增 Location 按钮)
+        # 2. 按钮区域 (布局优化)
         btn_grid = QGridLayout()
-        btn_grid.setSpacing(8)
+        btn_grid.setSpacing(5) # 稍微紧凑一点
 
         self.btn_local = QPushButton()
         self.btn_overview = QPushButton()
         self.btn_monster = QPushButton()
         self.btn_probe = QPushButton()
-        self.btn_location = QPushButton() # 新增
+        self.btn_location = QPushButton()
         
-        btns = [self.btn_local, self.btn_overview, self.btn_monster, self.btn_probe, self.btn_location]
-        for btn in btns:
+        # === 布局核心修改 ===
+        # Local: 独占第1行，且高度稍大，强调重要性
+        self.btn_local.setFixedHeight(35) 
+        self.btn_local.setStyleSheet(BTN_STYLE + "QPushButton { font-size: 12px; border-color: #00bcd4; }")
+        btn_grid.addWidget(self.btn_local, 0, 0, 1, 2) # 跨两列
+        
+        # 其他按钮：普通高度，并排
+        for btn in [self.btn_overview, self.btn_monster, self.btn_probe, self.btn_location]:
             btn.setStyleSheet(BTN_STYLE)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setFixedHeight(28)
 
-        btn_grid.addWidget(self.btn_local, 0, 0)
-        btn_grid.addWidget(self.btn_overview, 0, 1)
-        btn_grid.addWidget(self.btn_monster, 1, 0)
-        btn_grid.addWidget(self.btn_probe, 1, 1)
-        # Location 按钮放在第三行，占满两列
-        btn_grid.addWidget(self.btn_location, 2, 0, 1, 2)
+        # Overview / Rats 在第2行
+        btn_grid.addWidget(self.btn_overview, 1, 0)
+        btn_grid.addWidget(self.btn_monster, 1, 1)
+        
+        # Probe / Location 在第3行
+        btn_grid.addWidget(self.btn_probe, 2, 0)
+        btn_grid.addWidget(self.btn_location, 2, 1)
         
         main_layout.addLayout(btn_grid)
 
@@ -390,7 +394,7 @@ class DebugWindow(QDialog):
             self.setWindowIcon(QIcon(icon_path))
             
         self.setStyleSheet("background-color: #121212; color: #ccc;")
-        self.resize(750, 500) # 增加宽度以容纳 Location
+        self.resize(750, 500)
         
         self.current_group_idx = 0
         self.group_buttons = []
@@ -408,7 +412,6 @@ class DebugWindow(QDialog):
         self.img_layout = QHBoxLayout()
         self.img_layout.setSpacing(10)
         
-        # 增加 Location 预览
         for key in ["Local", "Overview", "Rats", "Probe", "Location"]:
             vbox = QVBoxLayout()
             lbl_title = QLabel(key.upper())
@@ -417,7 +420,6 @@ class DebugWindow(QDialog):
             lbl_title.setStyleSheet("color: #00bcd4; font-weight: bold;")
             
             lbl_img = QLabel()
-            # Location 不需要那么长，但为了布局统一，先设一样大，或者可以用 stretch
             lbl_img.setFixedSize(120, 500) 
             lbl_img.setStyleSheet("border: 1px solid #333; background: #000;")
             lbl_img.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
