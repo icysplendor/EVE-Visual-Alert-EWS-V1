@@ -49,7 +49,6 @@ class VisionEngine:
         for type_key, folder_name in folder_map.items():
             for scale in self.SCALES:
                 path = os.path.join(assets_dir, folder_name, scale)
-                # 传入 type_key 以便区分处理逻辑
                 imgs = self._load_images_from_folder(path, type_key)
                 self.templates[type_key][scale] = imgs
                 total_count += len(imgs)
@@ -75,7 +74,6 @@ class VisionEngine:
                             b, g, r, a = cv2.split(img)
                             gray = cv2.cvtColor(cv2.merge([b,g,r]), cv2.COLOR_BGR2GRAY)
                             
-                            # === 差异化预处理 ===
                             if type_key == "location":
                                 processed = self.preprocess_location(gray)
                                 name = os.path.splitext(filename)[0]
@@ -86,7 +84,6 @@ class VisionEngine:
                         else:
                             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                             
-                            # === 差异化预处理 ===
                             if type_key == "location":
                                 processed = self.preprocess_location(gray)
                                 name = os.path.splitext(filename)[0]
@@ -105,18 +102,11 @@ class VisionEngine:
         return cv2.LUT(image, table)
 
     def preprocess_image(self, gray_img):
-        """标准预处理：Gamma + ToZero (保留灰度细节)"""
         gamma_corrected = self.apply_gamma(gray_img, gamma=1.5)
         _, thresholded = cv2.threshold(gamma_corrected, 30, 255, cv2.THRESH_TOZERO)
         return thresholded
 
     def preprocess_location(self, gray_img):
-        """
-        位置识别专用预处理：二值化 (高对比度)
-        EVE 的星系名是纯白色的。
-        我们使用高阈值 (180)，把所有亮度低于 180 的背景（包括亮星云）全部抹黑。
-        只保留最亮的文字部分。
-        """
         _, binary = cv2.threshold(gray_img, 180, 255, cv2.THRESH_BINARY)
         return binary
 
@@ -139,13 +129,31 @@ class VisionEngine:
             return None
 
     def _is_safe_color(self, img_crop):
+        """
+        检查图片切片中是否包含超过阈值的绿色或蓝色像素 (友军)
+        包含暗光增强逻辑
+        """
         if img_crop is None or img_crop.size == 0:
             return False
+            
+        # === 新增：暗光增强逻辑 ===
+        # 如果图片最亮的部分都很暗（例如被半透明窗口遮挡），则进行归一化拉伸
+        # 将最暗的像素拉到0，最亮的拉到255，以此恢复色彩倾向
+        if np.max(img_crop) < 150: # 阈值设为150，只要不是特别亮，都尝试增强
+            try:
+                # 使用 MinMax 归一化增强对比度
+                img_crop = cv2.normalize(img_crop, None, 0, 255, cv2.NORM_MINMAX)
+            except:
+                pass # 极少数情况可能出错，忽略
+
         hsv = cv2.cvtColor(img_crop, cv2.COLOR_BGR2HSV)
+        
         mask_green = cv2.inRange(hsv, self.GREEN_LOWER, self.GREEN_UPPER)
         green_count = cv2.countNonZero(mask_green)
+        
         mask_blue = cv2.inRange(hsv, self.BLUE_LOWER, self.BLUE_UPPER)
         blue_count = cv2.countNonZero(mask_blue)
+        
         return (green_count > self.SAFE_COLOR_THRESHOLD) or (blue_count > self.SAFE_COLOR_THRESHOLD)
 
     def detect_scale(self, screen_img, threshold=0.85):
@@ -169,7 +177,6 @@ class VisionEngine:
             return None, 0.0
 
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
-        # 关键：使用 location 专用的预处理
         screen_processed = self.preprocess_location(screen_gray)
         
         best_name = None
