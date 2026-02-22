@@ -11,7 +11,7 @@ class VisionEngine:
             "overview": {},
             "monster": {},
             "probe": {},
-            "location": {}, # 新增
+            "location": {}, 
             "scaling": {} 
         }
         
@@ -22,6 +22,7 @@ class VisionEngine:
         
         self.clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8,8))
         
+        # 颜色过滤器
         self.GREEN_LOWER = np.array([35, 40, 40])
         self.GREEN_UPPER = np.array([85, 255, 255])
         self.BLUE_LOWER = np.array([95, 40, 40])
@@ -39,7 +40,7 @@ class VisionEngine:
             "overview": "hostile_icons_overview",
             "monster": "monster_icons",
             "probe": "probe_icons",
-            "location": "location", # 新增
+            "location": "location", 
             "scaling": "ui_scaling_adaptation"
         }
         
@@ -48,8 +49,8 @@ class VisionEngine:
         for type_key, folder_name in folder_map.items():
             for scale in self.SCALES:
                 path = os.path.join(assets_dir, folder_name, scale)
-                # location 需要文件名，其他不需要，为了统一，我们在 _load 里处理
-                imgs = self._load_images_from_folder(path, with_name=(type_key == "location"))
+                # 传入 type_key 以便区分处理逻辑
+                imgs = self._load_images_from_folder(path, type_key)
                 self.templates[type_key][scale] = imgs
                 total_count += len(imgs)
         
@@ -59,7 +60,7 @@ class VisionEngine:
             f"Total Templates: {total_count}"
         )
 
-    def _load_images_from_folder(self, folder, with_name=False):
+    def _load_images_from_folder(self, folder, type_key):
         templates = []
         if not os.path.exists(folder):
             return templates
@@ -73,21 +74,25 @@ class VisionEngine:
                         if img.shape[2] == 4:
                             b, g, r, a = cv2.split(img)
                             gray = cv2.cvtColor(cv2.merge([b,g,r]), cv2.COLOR_BGR2GRAY)
-                            processed = self.preprocess_image(gray)
-                            # 如果需要文件名，则存储元组 (img, mask, name)
-                            if with_name:
-                                # 去掉扩展名作为星系名
+                            
+                            # === 差异化预处理 ===
+                            if type_key == "location":
+                                processed = self.preprocess_location(gray)
                                 name = os.path.splitext(filename)[0]
                                 templates.append((processed, a, name))
                             else:
+                                processed = self.preprocess_image(gray)
                                 templates.append((processed, a))
                         else:
                             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                            processed = self.preprocess_image(gray)
-                            if with_name:
+                            
+                            # === 差异化预处理 ===
+                            if type_key == "location":
+                                processed = self.preprocess_location(gray)
                                 name = os.path.splitext(filename)[0]
                                 templates.append((processed, None, name))
                             else:
+                                processed = self.preprocess_image(gray)
                                 templates.append((processed, None))
                 except Exception:
                     pass
@@ -100,9 +105,20 @@ class VisionEngine:
         return cv2.LUT(image, table)
 
     def preprocess_image(self, gray_img):
+        """标准预处理：Gamma + ToZero (保留灰度细节)"""
         gamma_corrected = self.apply_gamma(gray_img, gamma=1.5)
         _, thresholded = cv2.threshold(gamma_corrected, 30, 255, cv2.THRESH_TOZERO)
         return thresholded
+
+    def preprocess_location(self, gray_img):
+        """
+        位置识别专用预处理：二值化 (高对比度)
+        EVE 的星系名是纯白色的。
+        我们使用高阈值 (180)，把所有亮度低于 180 的背景（包括亮星云）全部抹黑。
+        只保留最亮的文字部分。
+        """
+        _, binary = cv2.threshold(gray_img, 180, 255, cv2.THRESH_BINARY)
+        return binary
 
     def capture_screen(self, region, debug_name=None):
         self.last_error = None
@@ -145,10 +161,6 @@ class VisionEngine:
         return best_scale
 
     def match_location_name(self, screen_img, scale, threshold=0.85):
-        """
-        匹配星系名称
-        返回: (SystemName, Score) 或 (None, 0.0)
-        """
         if screen_img is None or not scale:
             return None, 0.0
             
@@ -157,7 +169,8 @@ class VisionEngine:
             return None, 0.0
 
         screen_gray = cv2.cvtColor(screen_img, cv2.COLOR_BGR2GRAY)
-        screen_processed = self.preprocess_image(screen_gray)
+        # 关键：使用 location 专用的预处理
+        screen_processed = self.preprocess_location(screen_gray)
         
         best_name = None
         best_score = 0.0
@@ -196,7 +209,6 @@ class VisionEngine:
         mask_map = np.zeros(screen_processed.shape, dtype=np.uint8)
 
         for item in template_list:
-            # 兼容带名字和不带名字的模板结构
             if len(item) == 3: tmpl_processed, mask, _ = item
             else: tmpl_processed, mask = item
             
